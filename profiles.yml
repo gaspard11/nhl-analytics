@@ -1,0 +1,12 @@
+my_new_project:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: service-account
+      project: nhl-analytics-485806
+      dataset: nhl_analytics    
+      location: europe-west10
+      threads: 4
+      keyfile: \credentials.json
+      timeout_seconds: 300
