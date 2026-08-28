@@ -2,7 +2,7 @@
 
 select
     g.value:id::int                            as game_id,
-    g.value:gameDate::string           as game_date,
+    g.value:gameDate::string                    as game_date,
     g.value:gameState::string                   as game_state,
     g.value:gameType::int                       as game_type,
     g.value:homeTeam.id::int                    as home_team_id,
