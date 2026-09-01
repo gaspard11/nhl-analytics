@@ -1,0 +1,9 @@
+sources:
+  - name: nhl_stg
+    database: NHL_DB
+    schema: STAGING
+    tables:
+      - name: STG_GAMES
+      - name: STG_GAME_STATS
+      - name: STG_PLAYERS
+
