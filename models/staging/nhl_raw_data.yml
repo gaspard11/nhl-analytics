@@ -5,3 +5,4 @@ sources:
     tables:
       - name: GAMES_RAW
       - name: GAME_PBP_RAW
+      - name : PLAYERS_INFO_RAW
