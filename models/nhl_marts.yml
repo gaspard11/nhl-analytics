@@ -1,0 +1,10 @@
+sources:
+  - name: nhl_marts
+    database: NHL_DB
+    schema: MARTS
+    tables:
+      - name: GAMES_HISTORY
+      - name: LEAGUE_RANKINGS
+      - name: NHL_TEAMS
+      - name: PLAYERS_GOALS_RANKINGS
+      - name: PLAYERS_ASSISTS_RANKINGS
