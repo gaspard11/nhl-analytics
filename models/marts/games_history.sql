@@ -8,5 +8,6 @@ select
     home_team_id,
     home_team_score,
     away_team_id,
-    away_team_score
+    away_team_score,
+    lastperiodtype as last_period_type
 from {{ref('stg_games')}}
