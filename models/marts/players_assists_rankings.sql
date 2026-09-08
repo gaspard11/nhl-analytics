@@ -43,7 +43,7 @@ WHERE ranking_date = (SELECT MAX(ranking_date) FROM NHL_DB.MARTS.PLAYERS_GOALS_R
 CTE_CUMUL_ASSISTS AS
 (
 SELECT
-    game_date as ranking_date,
+    (SELECT MAX(game_date) FROM CTE_NEW_ASSISTS) as ranking_date,
     COALESCE(NS.player_id, PS.player_id) as player_id,
     COALESCE(NS.new_assists,0) + COALESCE(PS.number_of_assists,0) as number_of_assists
 FROM CTE_NEW_ASSISTS NS
