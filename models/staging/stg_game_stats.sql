@@ -15,4 +15,4 @@ SELECT
     p.value:timeRemaining::STRING                AS time_remaining_in_period
 FROM {{ source('nhl_raw', 'GAME_PBP_RAW') }},
 LATERAL FLATTEN(input => raw_payload:plays) p
-WHERE p.value:typeDescKey = 'goal' and p.value.periodType <> 'SO'
+WHERE p.value:typeDescKey = 'goal' and p.value:periodDescriptor:periodType <> 'SO'
