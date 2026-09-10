@@ -3,13 +3,15 @@
 select
     g.value:id::int                            as game_id,
     g.value:gameDate::string                    as game_date,
-    g.value:gameState::string                   as game_state,
-    g.value:gameType::int                       as game_type,
-    g.value:homeTeam.id::int                    as home_team_id,
-    g.value:homeTeam.score::int                  as home_team_score,
-    g.value:awayTeam.id::int                    as away_team_id,
-    g.value:awayTeam.score::int                  as away_team_score,
-    g.value:gameOutcome:lastPeriodType::string   as lastPeriodType,
+    g.value:gameStateId::string                   as game_state,
+    g.value:homeTeamId:int                    as home_team_id,
+    g.value:homeScore::int                  as home_team_score,
+    g.value:visitingTeamId::int                   as away_team_id,
+    g.value:awayScore::int                  as away_team_score,
+    CASE 
+        WHEN g.value:period::int = 3 THEN 'REG' 
+        WHEN g.value:period::int = 4 THEN 'OT' 
+        ELSE 'SO' END                       as lastPeriodType,
     loaded_at
 from {{ source('nhl_raw', 'GAMES_RAW') }},
-     lateral flatten(input => raw_payload:games) g
+     lateral flatten(input => raw_payload:data) g
