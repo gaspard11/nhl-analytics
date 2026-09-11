@@ -18,8 +18,8 @@ SELECT
     ranking_date,
     player_id,
     number_of_goals
-FROM {{source('nhl_marts','PLAYERS_GOALS_RANKINGS' )}}
-WHERE ranking_date = (SELECT MAX(ranking_date) FROM {{source('nhl_marts','PLAYERS_GOALS_RANKINGS' )}})
+FROM {{ this }}
+WHERE ranking_date = (SELECT MAX(ranking_date) FROM {{ this }})
 ),
 
 CTE_CUMUL_GOAL_SCORERS AS
