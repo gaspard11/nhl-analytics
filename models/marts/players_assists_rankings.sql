@@ -37,8 +37,8 @@ SELECT
     ranking_date,
     player_id,
     number_of_assists
-FROM {{source("nhl_marts", 'PLAYERS_ASSISTS_RANKINGS')}}
-WHERE ranking_date = (SELECT MAX(ranking_date) FROM {{source("nhl_marts", 'PLAYERS_ASSISTS_RANKINGS')}})
+FROM {{ this }}
+WHERE ranking_date = (SELECT MAX(ranking_date) FROM {{ this }})
 ),
 
 CTE_CUMUL_ASSISTS AS
