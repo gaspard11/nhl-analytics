@@ -95,6 +95,7 @@ SELECT
 
 CTE_PRIOR_GAMES as (
 SELECT
+    ranking_date,
     team_id,
     games_played
     FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }}
@@ -146,7 +147,7 @@ CTE_RANKINGS AS
 (
 
 SELECT 
-    CPT.GAME_DATE,
+    COALESCE(CPT.GAME_DATE,(SELECT DATEADD(day, 1, MAX(TO_DATE(ranking_date, 'YYYY-MM-DD'))) FROM CTE_PRIOR_GAMES)) as game_date,
     rank() over (partition by CPT.GAME_DATE order by [CPT.cumul_points, -CG.games_played, CW.regulation_wins, CW.regulation_ot_wins, CW.total_wins] desc) as pre_tie_break_rank,
     CPT.TEAM_ID,
     CPT.cumul_points,
