@@ -34,16 +34,17 @@ GROUP BY player_id, game_date
 CTE_PRIOR_ASSISTS AS
 (
 SELECT 
+    ranking_date,
     player_id,
     number_of_assists
 FROM {{source("nhl_marts", 'PLAYERS_ASSISTS_RANKINGS')}}
-WHERE ranking_date = (SELECT MAX(ranking_date) FROM NHL_DB.MARTS.PLAYERS_GOALS_RANKINGS)
+WHERE ranking_date = (SELECT MAX(ranking_date) FROM {{source("nhl_marts", 'PLAYERS_ASSISTS_RANKINGS')}})
 ),
 
 CTE_CUMUL_ASSISTS AS
 (
 SELECT
-    (SELECT MAX(game_date) FROM CTE_NEW_ASSISTS) as ranking_date,
+    COALESCE((SELECT MAX(game_date) FROM CTE_NEW_ASSISTS),(SELECT DATEADD(day, 1, MAX(TO_DATE(ranking_date, 'YYYY-MM-DD'))) FROM CTE_PRIOR_ASSISTS)) as ranking_date,
     COALESCE(NS.player_id, PS.player_id) as player_id,
     COALESCE(NS.new_assists,0) + COALESCE(PS.number_of_assists,0) as number_of_assists
 FROM CTE_NEW_ASSISTS NS
