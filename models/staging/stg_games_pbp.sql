@@ -1,4 +1,4 @@
-{{ config(materialized='table', schema='staging') }}
+{{ config(materialized='view', schema='staging') }}
 
 SELECT
     raw_payload:id::INT as game_id,
@@ -12,7 +12,8 @@ SELECT
     p.value:details:assist2PlayerId::INT       AS assist2_player_id,
     p.value:periodDescriptor:number::INT        AS period_number,
     p.value:timeInPeriod::STRING                 AS time_in_period,
-    p.value:timeRemaining::STRING                AS time_remaining_in_period
+    p.value:timeRemaining::STRING                AS time_remaining_in_period,
+    
 FROM {{ source('nhl_raw', 'GAME_PBP_RAW') }},
 LATERAL FLATTEN(input => raw_payload:plays) p
 WHERE p.value:typeDescKey = 'goal' and p.value:periodDescriptor:periodType <> 'SO'

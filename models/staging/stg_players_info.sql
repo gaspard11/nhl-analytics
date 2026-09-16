@@ -1,4 +1,4 @@
-{{ config(materialized='table', schema='staging') }}
+{{ config(materialized='view', schema='staging') }}
 
 SELECT
     raw_payload:playerId::INT as player_id,
