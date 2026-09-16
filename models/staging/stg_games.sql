@@ -1,7 +1,8 @@
-{{ config(materialized='table', schema='staging') }}
+{{ config(materialized='view', schema= 'staging') }}
 
 select
     g.value:id::int                            as game_id,
+    g.value:season:int                         as season,
     g.value:gameDate::string                    as game_date,
     g.value:gameStateId::int                   as game_state,
     g.value:homeTeamId::int                    as home_team_id,

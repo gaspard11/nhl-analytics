@@ -3,6 +3,7 @@
 
 SELECT
     game_date as ranking_date,
+    season,
     rank() over (partition by game_date order by [cumul_points, -RPT.games_played, regulation_wins, regulation_ot_wins, total_wins, COALESCE(tie_rate,0), diff, goals_for] desc) as ranking,
     RPT.team_id,
     cumul_points as points,
@@ -13,5 +14,5 @@ SELECT
     regulation_wins,
     regulation_ot_wins,
     total_wins
-FROM {{ref('stg_league_ranking_pre_tie_breaker')}} RPT
-LEFT JOIN {{ref('stg_tied_teams_rate')}} TTR on RPT.team_id = TTR.team_id and RPT.TIE_GROUP_ID = TTR.TIE_GROUP_ID
+FROM {{ref('int_league_ranking_pre_tie_breaker')}} RPT
+LEFT JOIN {{ref('int_tied_teams_rate')}} TTR on RPT.team_id = TTR.team_id and RPT.TIE_GROUP_ID = TTR.TIE_GROUP_ID
