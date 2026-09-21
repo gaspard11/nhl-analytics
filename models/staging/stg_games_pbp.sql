@@ -13,7 +13,6 @@ SELECT
     p.value:periodDescriptor:number::INT        AS period_number,
     p.value:timeInPeriod::STRING                 AS time_in_period,
     p.value:timeRemaining::STRING                AS time_remaining_in_period,
-    
-FROM {{ source('nhl_raw', 'GAME_PBP_RAW') }},
+FROM {{ source('nhl_raw', 'GAMES_PBP_RAW') }},
 LATERAL FLATTEN(input => raw_payload:plays) p
 WHERE p.value:typeDescKey = 'goal' and p.value:periodDescriptor:periodType <> 'SO'
