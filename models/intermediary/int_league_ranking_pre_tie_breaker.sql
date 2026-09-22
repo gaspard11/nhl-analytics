@@ -2,6 +2,22 @@
 
 
 
+{%- set season_query -%}
+    SELECT MAX(season) FROM {{ ref('stg_games') }}
+    WHERE game_date = (SELECT MAX(game_date) FROM {{ ref('stg_games') }})
+{%- endset -%}
+
+{%- set season_selected = run_query(season_query).columns[0].values()[0] -%}
+
+{%- set count_query -%}
+    SELECT COUNT(*) AS cnt
+    FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }}
+    WHERE season = {{ season_selected }}
+{%- endset -%}
+
+{%- set rankings_count = run_query(count_query).columns[0].values()[0] if execute else 0 -%}
+
+
 WITH STG_GAMES AS
 (
     SELECT * FROM {{ref('stg_games')}} 
@@ -10,8 +26,29 @@ WITH STG_GAMES AS
 
 CURRENT_RANKINGS AS
 (
-    SELECT * FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }}
-    WHERE RANKING_DATE = (SELECT MAX(RANKING_DATE) FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }})
+
+    {% if rankings_count == 0 %}
+        SELECT 
+            DATEADD(day, -1, (SELECT MAX(GAME_DATE) FROM {{ ref('stg_games') }})) as ranking_date,
+            (SELECT MAX(season) FROM {{ref('stg_games')}}) as season,
+            32 as ranking,
+            team_id,
+            0 as points,
+            0 as goals_for,
+            0 as goals_against,
+            0 as goal_diff,
+            0 as games_played,
+            0 as regulation_wins,
+            0 as regulation_ot_wins,
+            0 as total_wins
+        FROM {{ref('NHL_TEAMS')}}
+    {% else %}
+        SELECT *
+        FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }}
+        WHERE RANKING_DATE = (
+            SELECT MAX(RANKING_DATE) FROM {{ rankings_source }}
+        )
+    {% endif %}
 ),
 
 CTE_NEW_POINTS AS
@@ -157,7 +194,7 @@ CTE_RANKINGS AS
 (
 
 SELECT 
-    COALESCE(CPT.GAME_DATE,(SELECT DATEADD(day, 1, MAX(TO_DATE(ranking_date, 'YYYY-MM-DD'))) FROM CTE_PRIOR_GAMES)) as game_date,
+    CPT.GAME_DATE as game_date,
     (SELECT MAX(season) FROM STG_GAMES) as season,
     rank() over (partition by CPT.GAME_DATE order by [CPT.cumul_points, -CG.games_played, CW.regulation_wins, CW.regulation_ot_wins, CW.total_wins] desc) as pre_tie_break_rank,
     CPT.TEAM_ID,

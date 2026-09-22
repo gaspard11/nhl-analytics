@@ -1,4 +1,4 @@
-{{ config(materialized='incremental', schema='marts', unique_key= 'player_id') }}
+{{ config(materialized='incremental', schema='marts', unique_key= 'player_id', incremental_strategy = 'merge') }}
 
 WITH CTE_PLAYER_CURRENT_TEAM AS
 (

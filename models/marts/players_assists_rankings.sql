@@ -22,7 +22,7 @@ SELECT
 FROM STG_GAMES_PBP a
 JOIN STG_GAMES b on a.game_id = b.game_id
 WHERE assist1_player_id is not null
-GROUP BY assist1_player_id, game_date
+GROUP BY assist1_player_id, game_date, season
 UNION ALL
 SELECT 
     game_date,
@@ -32,7 +32,7 @@ SELECT
 FROM STG_GAMES_PBP a
 JOIN STG_GAMES b on a.game_id = b.game_id
 WHERE assist2_player_id is not null
-GROUP BY assist2_player_id, game_date
+GROUP BY assist2_player_id, game_date, season
 ),
 CTE_NEW_ASSISTS AS
 (
@@ -42,7 +42,7 @@ SELECT
     player_id,
     SUM(new_assists) as new_assists
 FROM CTE_NEW_ASSISTS_RAW
-GROUP BY player_id, game_date
+GROUP BY player_id, game_date, season
 ),
 
 CTE_PRIOR_ASSISTS AS
