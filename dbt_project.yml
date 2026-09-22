@@ -23,8 +23,3 @@ target-path: "target"  # directory which will store compiled SQL files
 clean-targets:         # directories to be removed by `dbt clean`
   - "target"
   - "dbt_packages"
-
-
-on-run-end:
-  - "{{ truncate_staging_on_success(results) }}"
-  - "{{ truncate_raw_on_success(results) }}"

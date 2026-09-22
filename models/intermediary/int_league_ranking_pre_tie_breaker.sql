@@ -1,19 +1,70 @@
-{{ config(materialized='view', schema='staging') }}
+{{ config(materialized='view', schema='intermediary') }}
 
-WITH CTE_NEW_POINTS AS
+
+
+{%- set season_query -%}
+    SELECT MAX(season) FROM {{ ref('stg_games') }}
+    WHERE game_date = (SELECT MAX(game_date) FROM {{ ref('stg_games') }})
+{%- endset -%}
+
+{%- set season_selected = run_query(season_query).columns[0].values()[0] -%}
+
+{%- set count_query -%}
+    SELECT COUNT(*) AS cnt
+    FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }}
+    WHERE season = {{ season_selected }}
+{%- endset -%}
+
+{%- set rankings_count = run_query(count_query).columns[0].values()[0] if execute else 0 -%}
+
+
+WITH STG_GAMES AS
+(
+    SELECT * FROM {{ref('stg_games')}} 
+    WHERE game_date = (SELECT MAX(GAME_DATE) FROM {{ref('stg_games')}})
+),
+
+CURRENT_RANKINGS AS
+(
+
+    {% if rankings_count == 0 %}
+        SELECT 
+            DATEADD(day, -1, (SELECT MAX(GAME_DATE) FROM {{ ref('stg_games') }})) as ranking_date,
+            (SELECT MAX(season) FROM {{ref('stg_games')}}) as season,
+            32 as ranking,
+            team_id,
+            0 as points,
+            0 as goals_for,
+            0 as goals_against,
+            0 as goal_diff,
+            0 as games_played,
+            0 as regulation_wins,
+            0 as regulation_ot_wins,
+            0 as total_wins
+        FROM {{ref('NHL_TEAMS')}}
+    {% else %}
+        SELECT *
+        FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }}
+        WHERE RANKING_DATE = (
+            SELECT MAX(RANKING_DATE) FROM {{ rankings_source }}
+        )
+    {% endif %}
+),
+
+CTE_NEW_POINTS AS
 (
 SELECT
     GAME_DATE,
     CASE WHEN HOME_TEAM_SCORE > AWAY_TEAM_SCORE THEN HOME_TEAM_ID ELSE AWAY_TEAM_ID END as TEAM_ID,
     2 as points
-FROM {{ref('stg_games')}}
+FROM STG_GAMES
 WHERE HOME_TEAM_SCORE IS NOT NULL
 UNION
 SELECT
     GAME_DATE,
     CASE WHEN HOME_TEAM_SCORE < AWAY_TEAM_SCORE THEN HOME_TEAM_ID ELSE AWAY_TEAM_ID END as TEAM_ID,
     CASE WHEN lastperiodtype in ('OT','SO') THEN 1 ELSE 0 END as points,
-FROM {{ref('stg_games')}}
+FROM STG_GAMES
 WHERE HOME_TEAM_SCORE IS NOT NULL
 ),
 
@@ -24,7 +75,7 @@ SELECT
     HOME_TEAM_ID as team_id,
     HOME_TEAM_SCORE as goals_for,
     AWAY_TEAM_SCORE as goals_against
-FROM {{ref('stg_games')}}
+FROM STG_GAMES
 WHERE HOME_TEAM_SCORE IS NOT NULL
 UNION
 SELECT 
@@ -32,7 +83,7 @@ SELECT
     AWAY_TEAM_ID as team_id,
     AWAY_TEAM_SCORE as goals_for,
     HOME_TEAM_SCORE as goals_against
-FROM {{ref('stg_games')}}
+FROM STG_GAMES
 WHERE HOME_TEAM_SCORE IS NOT NULL
 ),
 
@@ -44,7 +95,7 @@ SELECT
     CASE WHEN lastperiodtype = 'REG' THEN 1 ELSE 0 END as regulation_win,
     CASE WHEN lastperiodtype in ('OT','REG') THEN 1 ELSE 0 END as regulation_ot_win,
     1 as win
-FROM {{ref('stg_games')}}
+FROM STG_GAMES
 WHERE HOME_TEAM_SCORE IS NOT NULL
 ),
 
@@ -54,14 +105,14 @@ SELECT
     GAME_DATE,
     HOME_TEAM_ID as TEAM_ID,
     1 as game_played
-FROM {{ref('stg_games')}}
+FROM STG_GAMES
 WHERE HOME_TEAM_SCORE IS NOT NULL
 UNION ALL
 SELECT
     GAME_DATE,
     AWAY_TEAM_ID as TEAM_ID,
     1 as game_played
-FROM {{ref('stg_games')}}
+FROM STG_GAMES
 WHERE HOME_TEAM_SCORE IS NOT NULL
 ),
 
@@ -69,8 +120,7 @@ CTE_PRIOR_POINTS as (
 SELECT
     team_id,
     points,
-    FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }}
-    WHERE RANKING_DATE = (SELECT MAX(RANKING_DATE) FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }})
+    FROM CURRENT_RANKINGS
 ),
 
 CTE_PRIOR_DIFF as (
@@ -79,8 +129,7 @@ SELECT
     GOAL_DIFF,
     goals_for,
     goals_against
-    FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }}
-    WHERE RANKING_DATE = (SELECT MAX(RANKING_DATE) FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }})
+    FROM CURRENT_RANKINGS
 ),
 
 CTE_PRIOR_WINS as (
@@ -89,8 +138,7 @@ SELECT
     regulation_wins,
     regulation_ot_wins,
     total_wins
-    FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }}
-    WHERE RANKING_DATE = (SELECT MAX(RANKING_DATE) FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }})
+    FROM CURRENT_RANKINGS
 ),
 
 CTE_PRIOR_GAMES as (
@@ -98,8 +146,7 @@ SELECT
     ranking_date,
     team_id,
     games_played
-    FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }}
-    WHERE RANKING_DATE = (SELECT MAX(RANKING_DATE) FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }})
+    FROM CURRENT_RANKINGS
 ),
 
 CUMUL_POINTS as (
@@ -147,7 +194,8 @@ CTE_RANKINGS AS
 (
 
 SELECT 
-    COALESCE(CPT.GAME_DATE,(SELECT DATEADD(day, 1, MAX(TO_DATE(ranking_date, 'YYYY-MM-DD'))) FROM CTE_PRIOR_GAMES)) as game_date,
+    CPT.GAME_DATE as game_date,
+    (SELECT MAX(season) FROM STG_GAMES) as season,
     rank() over (partition by CPT.GAME_DATE order by [CPT.cumul_points, -CG.games_played, CW.regulation_wins, CW.regulation_ot_wins, CW.total_wins] desc) as pre_tie_break_rank,
     CPT.TEAM_ID,
     CPT.cumul_points,
@@ -166,6 +214,7 @@ JOIN CUMUL_GAMES CG on CPT.TEAM_ID = CG.TEAM_ID
 
 SELECT
     game_date,
+    season,
     pre_tie_break_rank,
     team_id,
     cumul_points,

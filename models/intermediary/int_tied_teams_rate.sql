@@ -13,9 +13,9 @@ SELECT DISTINCT
     GH.last_period_type,
     {{nhl_matchups_ids()}} as matchup_id
 FROM {{ ref('games_history') }} GH
-JOIN {{ ref('stg_league_ranking_pre_tie_breaker') }} RP_HOME
+JOIN {{ ref('int_league_ranking_pre_tie_breaker') }} RP_HOME
     ON RP_HOME.TEAM_ID = GH.HOME_TEAM_ID
-JOIN {{ ref('stg_league_ranking_pre_tie_breaker') }} RP_AWAY
+JOIN {{ ref('int_league_ranking_pre_tie_breaker') }} RP_AWAY
     ON RP_AWAY.TEAM_ID = GH.AWAY_TEAM_ID
    AND RP_AWAY.TIE_GROUP_ID = RP_HOME.TIE_GROUP_ID
 WHERE RP_HOME.TIE_GROUP_ID IS NOT NULL
