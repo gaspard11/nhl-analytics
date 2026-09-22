@@ -21,7 +21,7 @@ SELECT
     COUNT(*) as new_goals
 FROM STG_GAMES_PBP a
 JOIN STG_GAMES b on a.game_id = b.game_id
-GROUP BY scoring_player_id, game_date
+GROUP BY scoring_player_id, game_date, season
 ),
 
 CTE_PRIOR_GOAL_SCORERS AS
