@@ -13,4 +13,4 @@ SELECT
     period_number,
     time_in_period,
     time_remaining_in_period
-FROM {{ ref('stg_game_stats') }}
+FROM {{ ref('stg_games_pbp') }}

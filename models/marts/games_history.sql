@@ -2,6 +2,7 @@
 
 select
     game_id,
+    season,
     game_date,
     game_state,
     home_team_id,
