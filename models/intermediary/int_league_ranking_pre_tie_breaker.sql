@@ -46,7 +46,7 @@ CURRENT_RANKINGS AS
         SELECT *
         FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }}
         WHERE RANKING_DATE = (
-            SELECT MAX(RANKING_DATE) FROM {{ rankings_source }}
+            SELECT MAX(RANKING_DATE) FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }}
         )
     {% endif %}
 ),
