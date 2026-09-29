@@ -1,77 +1,92 @@
-{{ config(materialized='incremental', unique_key= ['team_id', 'ranking_date']) }}
-
-{%- set season_query -%}
-    SELECT MAX(season) FROM {{ ref('stg_games') }}
-    WHERE game_date = (SELECT MAX(game_date) FROM {{ ref('stg_games') }})
-{%- endset -%}
-
-{%- set season_selected = run_query(season_query).columns[0].values()[0] -%}
-
-{%- set count_query -%}
-    SELECT COUNT(*) AS cnt
-    FROM {{ source('nhl_marts', 'LEAGUE_RANKINGS') }}
-    WHERE season = {{ season_selected }}
-{%- endset -%}
-
-{%- set rankings_count = run_query(count_query).columns[0].values()[0] if execute else 0 -%}
+{{ config(
+    materialized='incremental',
+    incremental_strategy='delete+insert',
+    unique_key=['season', 'ranking_date'],
+    on_schema_change='fail'
+) }}
 
 
-WITH INIT_OR_APPEND AS
-(
-{% if rankings_count == 0 %}
-    SELECT 
-        DATEADD(day, -1, (SELECT MAX(GAME_DATE) FROM {{ ref('stg_games') }})) as ranking_date,
-        (SELECT MAX(season) FROM {{ref('stg_games')}}) as season,
-        32 as ranking,
+
+with standings as (
+
+    select
+        season,
+        ranking_date,
         team_id,
-        0 as points,
-        0 as goals_for,
-        0 as goals_against,
-        0 as goal_diff,
-        0 as games_played,
-        0 as regulation_wins,
-        0 as regulation_ot_wins,
-        0 as total_wins
-    FROM {{ref('NHL_TEAMS')}}
-    UNION
-    SELECT
-        game_date as ranking_date,
-        season,
-        rank() over (partition by game_date order by [cumul_points, -RPT.games_played, regulation_wins, regulation_ot_wins, total_wins, COALESCE(tie_rate,0), diff, goals_for] desc) as ranking,
-        RPT.team_id,
-        cumul_points as points,
-        goals_for,
-        goals_against,
-        diff as goal_diff,
-        RPT.games_played,
+        games_played,
+        cumul_points,
+        total_wins,
         regulation_wins,
         regulation_ot_wins,
-        total_wins
-    FROM {{ref('int_league_ranking_pre_tie_breaker')}} RPT
-    LEFT JOIN {{ref('int_tied_teams_rate')}} TTR on RPT.team_id = TTR.team_id and RPT.TIE_GROUP_ID = TTR.TIE_GROUP_ID
-{% else %}
-    SELECT
-        game_date as ranking_date,
-        season,
-        rank() over (partition by game_date order by [cumul_points, -RPT.games_played, regulation_wins, regulation_ot_wins, total_wins, COALESCE(tie_rate,0), diff, goals_for] desc) as ranking,
-        RPT.team_id,
-        cumul_points as points,
         goals_for,
         goals_against,
-        diff as goal_diff,
-        RPT.games_played,
-        regulation_wins,
-        regulation_ot_wins,
-        total_wins
-    FROM {{ref('int_league_ranking_pre_tie_breaker')}} RPT
-    LEFT JOIN {{ref('int_tied_teams_rate')}} TTR on RPT.team_id = TTR.team_id and RPT.TIE_GROUP_ID = TTR.TIE_GROUP_ID
-{% endif %}
+        diff,
+        tie_group_id,
+        _batch_loaded_at
+    from {{ ref('int_league_ranking_pre_tie_breaker') }}
+    {% if is_incremental() %}
+    where _batch_loaded_at > (
+        select coalesce(max(_batch_loaded_at), '1900-01-01'::timestamp_ltz) from {{ this }}
+    )
+    {% endif %}
+
+),
+
+head_to_head as (
+
+    select
+        season,
+        ranking_date,
+        tie_group_id,
+        team_id,
+        tie_rate
+    from {{ ref('int_tied_teams_rate') }}
+
+),
+
+standings_with_tie_rate as (
+
+    select
+        s.*,
+        coalesce(h.tie_rate, 0) as tie_rate
+    from standings s
+    left join head_to_head h
+        on  h.season = s.season
+        and h.ranking_date = s.ranking_date
+        and h.tie_group_id = s.tie_group_id
+        and h.team_id = s.team_id
+
 )
 
-SELECT 
-    *
-FROM INIT_OR_APPEND
-
-
-
-
+select
+    ranking_date,
+    season,
+    case
+        -- Day 0: nobody has played yet, every team is ranked last
+        when max(games_played) over (partition by season, ranking_date) = 0
+            then count(*) over (partition by season, ranking_date)
+        else rank() over (
+            partition by season, ranking_date
+            order by
+                cumul_points       desc,   -- 1. points
+                games_played       asc,    -- 2. fewer games played
+                regulation_wins    desc,   -- 3. regulation wins
+                regulation_ot_wins desc,   -- 4. regulation + OT wins
+                total_wins         desc,   -- 5. total wins
+                tie_rate           desc,   -- 6. head-to-head points %
+                diff               desc,   -- 7. goal differential
+                goals_for          desc    -- 8. goals for
+        )
+    end                 as ranking,
+    team_id,
+    cumul_points        as points,
+    goals_for,
+    goals_against,
+    diff                as goal_diff,
+    games_played,
+    regulation_wins,
+    regulation_ot_wins,
+    total_wins,
+    tie_rate,
+    _batch_loaded_at
+from standings_with_tie_rate

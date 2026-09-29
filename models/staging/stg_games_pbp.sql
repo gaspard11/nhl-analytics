@@ -21,6 +21,7 @@ SELECT
     p.value:periodDescriptor:number::INT        AS period_number,
     p.value:timeInPeriod::STRING                 AS time_in_period,
     p.value:timeRemaining::STRING                AS time_remaining_in_period,
+    fetched_at
 FROM LATEST_PAYLOAD,
 LATERAL FLATTEN(input => raw_payload:plays) p
 WHERE p.value:typeDescKey = 'goal' and p.value:periodDescriptor:periodType <> 'SO'
