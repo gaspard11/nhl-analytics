@@ -1,5 +1,3 @@
-{{ config(materialized='view', schema= 'staging') }}
-
 select
     g.value:id::int                            as game_id,
     g.value:season::int                         as season,

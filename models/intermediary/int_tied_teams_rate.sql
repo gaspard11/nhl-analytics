@@ -1,5 +1,3 @@
-{{ config(materialized='view', schema='staging') }}
-
 WITH CTE_DEDUP_GAMES_TIED_TEAMS AS
 (
 SELECT DISTINCT
