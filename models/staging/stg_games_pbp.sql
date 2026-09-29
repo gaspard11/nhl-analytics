@@ -1,4 +1,12 @@
-{{ config(materialized='view', schema='staging') }}
+-- Keep the latest play-by-play load of each game before flattening, so every goal of that game is kept
+WITH LATEST_PAYLOAD AS
+(
+    SELECT
+        raw_payload,
+        fetched_at
+    FROM {{ source('nhl_raw', 'GAMES_PBP_RAW') }}
+    qualify row_number() over (partition by raw_payload:id::int order by fetched_at desc) = 1
+)
 
 SELECT
     raw_payload:id::INT as game_id,
@@ -13,6 +21,7 @@ SELECT
     p.value:periodDescriptor:number::INT        AS period_number,
     p.value:timeInPeriod::STRING                 AS time_in_period,
     p.value:timeRemaining::STRING                AS time_remaining_in_period,
-FROM {{ source('nhl_raw', 'GAMES_PBP_RAW') }},
+    fetched_at
+FROM LATEST_PAYLOAD,
 LATERAL FLATTEN(input => raw_payload:plays) p
 WHERE p.value:typeDescKey = 'goal' and p.value:periodDescriptor:periodType <> 'SO'

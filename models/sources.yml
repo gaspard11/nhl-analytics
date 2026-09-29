@@ -6,8 +6,3 @@ sources:
       - name: GAMES_RAW
       - name: GAMES_PBP_RAW
       - name : PLAYERS_INFO_RAW
-  - name: nhl_marts
-    database: NHL_ANALYTICS
-    schema: MARTS
-    tables:
-      - name: LEAGUE_RANKINGS
