@@ -9,10 +9,10 @@ macros:
       (e.g. DBT_GROBERT_MARTS), so non-production runs can never overwrite production tables.
     arguments:
       - name: custom_schema_name
-        type: string
+        type: optional[string]
         description: The schema set in the model's config or dbt_project.yml (e.g. marts). None when not set.
       - name: node
-        type: object
+        type: any
         description: The node being built. Not used.
 
   - name: nhl_tie_group_id
