@@ -9,5 +9,9 @@ select
     home_team_score,
     away_team_id,
     away_team_score,
-    lastperiodtype as last_period_type
+    last_period_type,
+    fetched_at
 from {{ref('stg_games')}}
+{% if is_incremental() %}
+where fetched_at > (select max(fetched_at) from {{ this }})
+{% endif %}
