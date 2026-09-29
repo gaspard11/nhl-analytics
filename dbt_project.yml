@@ -2,12 +2,16 @@
 # Name your project! Project names should contain only lowercase characters
 # and underscores. A good package name should reflect your organization's
 # name or the intended use of these models
-name: 'my_new_project'
+name: 'nhl_analytics'
 version: '1.0.0'
 config-version: 2
 
+# Snapshot `schema` config (without target_schema) needs dbt 1.9+
+require-dbt-version: ">=1.9.0"
+
 # This setting configures which "profile" dbt uses for this project.
-profile: 'default'
+# Only used by dbt Core; dbt Cloud uses the environment's connection.
+profile: 'nhl_analytics'
 
 # These configurations specify where dbt should look for different types of files.
 # The `model-paths` config, for example, states that models in this project can be
@@ -23,3 +27,17 @@ target-path: "target"  # directory which will store compiled SQL files
 clean-targets:         # directories to be removed by `dbt clean`
   - "target"
   - "dbt_packages"
+
+# Folder-level defaults. A model's own config() overrides them.
+# Schemas go through macros/generate_schema_name.sql: as-is in prod, prefixed elsewhere.
+models:
+  nhl_analytics:
+    staging:
+      +schema: staging
+      +materialized: view
+    intermediary:
+      +schema: intermediary
+      +materialized: view
+    marts:
+      +schema: marts
+      +materialized: table

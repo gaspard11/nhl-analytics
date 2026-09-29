@@ -1,4 +1,4 @@
-{{ config(materialized='incremental', schema='marts', unique_key= ['team_id', 'ranking_date']) }}
+{{ config(materialized='incremental', unique_key= ['team_id', 'ranking_date']) }}
 
 {%- set season_query -%}
     SELECT MAX(season) FROM {{ ref('stg_games') }}

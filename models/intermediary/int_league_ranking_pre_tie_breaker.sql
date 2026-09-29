@@ -1,7 +1,3 @@
-{{ config(materialized='view', schema='intermediary') }}
-
-
-
 {%- set season_query -%}
     SELECT MAX(season) FROM {{ ref('stg_games') }}
     WHERE game_date = (SELECT MAX(game_date) FROM {{ ref('stg_games') }})

@@ -1,4 +1,4 @@
-{{ config(materialized='incremental', schema='marts',unique_key = ['player_id','ranking_date']) }}
+{{ config(materialized='incremental', unique_key = ['player_id','ranking_date']) }}
 
 
 WITH STG_GAMES AS

@@ -1,5 +1,3 @@
-{{ config(materialized='view', schema='staging') }}
-
 SELECT
     raw_payload:playerId::INT as player_id,
     raw_payload:firstName.default::STRING as firstName,

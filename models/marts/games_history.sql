@@ -1,4 +1,4 @@
-{{ config(materialized='incremental', schema='marts', unique_key= 'game_id') }}
+{{ config(materialized='incremental', unique_key= 'game_id') }}
 
 select
     game_id,

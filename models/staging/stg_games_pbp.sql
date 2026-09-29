@@ -1,5 +1,3 @@
-{{ config(materialized='view', schema='staging') }}
-
 -- Keep the latest play-by-play load of each game before flattening, so every goal of that game is kept
 WITH LATEST_PAYLOAD AS
 (
@@ -25,4 +23,4 @@ SELECT
     p.value:timeRemaining::STRING                AS time_remaining_in_period,
 FROM LATEST_PAYLOAD,
 LATERAL FLATTEN(input => raw_payload:plays) p
-WHERE p.value:typeDescKey = 'goal' and p.value:periodDescriptor:periodType <> 'SO'
+WHERE p.value:typeDescKey = 'goal' and p.value:periodDescriptor:periodType <> 'SO'

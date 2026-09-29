@@ -1,4 +1,4 @@
-{{ config(materialized='incremental', schema='marts', unique_key= 'player_id', incremental_strategy = 'merge') }}
+{{ config(materialized='incremental', unique_key= 'player_id', incremental_strategy = 'merge') }}
 
 WITH STG_GAMES_PBP AS
 (
