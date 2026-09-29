@@ -198,9 +198,9 @@ select
     season,
     ranking_date,
     player_id,
-    number_of_goals,
-    number_of_assists,
-    number_of_goals + number_of_assists           as number_of_points,
+    number_of_goals::integer                         as number_of_goals,
+    number_of_assists::integer                       as number_of_assists,
+    (number_of_goals + number_of_assists)::integer   as number_of_points,
     (select max(fetched_at) from player_events)   as _source_fetched_at,
     current_timestamp()                           as _batch_loaded_at
 from cumulative
