@@ -5,6 +5,10 @@
     on_schema_change='fail'
 ) }}
 
+-- Cumulative state table: season-to-date totals per team for every game date (plus day 0),
+-- before the head-to-head tie-breaker. Each run recomputes every date from the earliest newly
+-- loaded game onwards, starting from the last row before that date.
+
 with games as (
 
     select * from {{ ref('int_team_game_results') }}
@@ -71,7 +75,7 @@ prior_state as (
         0                                      as prior_goals_against
         {% endif %}
     from batch_start b
-    cross join {{ ref('NHL_TEAMS') }} teams
+    cross join {{ ref('nhl_teams') }} teams
     {% if is_incremental() %}
     left join prior_rows p
         on p.season = b.season

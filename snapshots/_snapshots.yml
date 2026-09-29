@@ -1,0 +1,17 @@
+version: 2
+
+snapshots:
+  - name: nhl_players_team_snapshot
+    description: >
+      History of each player's team, built from dim_players.team_id (check strategy).
+      A new version is recorded whenever a player's team changes, e.g. after a trade.
+      The current version of each player has dbt_valid_to = null.
+    columns:
+      - name: player_id
+        description: "{{ doc('player_id') }}"
+      - name: team_id
+        description: "{{ doc('team_id') }}"
+      - name: dbt_valid_from
+        description: When this team started being recorded for the player (time of the snapshot run).
+      - name: dbt_valid_to
+        description: When the player's team changed. Null for the current version.

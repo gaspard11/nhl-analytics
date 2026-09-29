@@ -7,7 +7,7 @@
 -- Returns the rows that break a rule.
 
 select *
-from {{ ref('league_rankings') }}
+from {{ ref('fct_league_rankings') }}
 where total_wins > games_played
    or regulation_wins > regulation_ot_wins
    or regulation_ot_wins > total_wins
