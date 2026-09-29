@@ -1,31 +1,51 @@
-WITH CTE_DEDUP_GAMES_TIED_TEAMS AS
-(
-SELECT
-    RP_HOME.SEASON,                                          
-    RP_HOME.RANKING_DATE,                                   
-    RP_HOME.TIE_GROUP_ID,
-    GH.GAME_DATE,
-    GH.GAME_ID,
-    GH.HOME_TEAM_ID,
-    GH.AWAY_TEAM_ID,
-    GH.HOME_TEAM_SCORE,
-    GH.AWAY_TEAM_SCORE,
-    GH.LAST_PERIOD_TYPE,                   
-    {{ nhl_matchups_ids() }} AS MATCHUP_ID
-FROM {{ ref('stg_games') }} GH                               
-JOIN {{ ref('int_league_ranking_pre_tie_breaker') }} RP_HOME
-    ON  RP_HOME.TEAM_ID = GH.HOME_TEAM_ID
-    AND RP_HOME.SEASON = GH.SEASON                           
-    AND GH.GAME_DATE <= RP_HOME.RANKING_DATE                  
-JOIN {{ ref('int_league_ranking_pre_tie_breaker') }} RP_AWAY
-    ON  RP_AWAY.TEAM_ID = GH.AWAY_TEAM_ID
-    AND RP_AWAY.SEASON = RP_HOME.SEASON                      
-    AND RP_AWAY.RANKING_DATE = RP_HOME.RANKING_DATE        
-    AND RP_AWAY.TIE_GROUP_ID = RP_HOME.TIE_GROUP_ID
-WHERE RP_HOME.TIE_GROUP_ID IS NOT NULL
+-- Head-to-head tie-breaker: for each tie group on each ranking date, the points % of each
+-- tied team in games played so far this season against the other teams of its tie group.
+-- When two teams played an odd number of games, the oldest game hosted by the team with
+-- the extra home game is excluded (NHL rule).
+
+with games as (
+
+    select * from {{ ref('stg_nhl_api__games') }}
+
 ),
 
-CTE_BASE as (
+standings as (
+
+    select * from {{ ref('int_league_ranking_pre_tie_breaker') }}
+
+),
+
+-- Games played up to the ranking date between two teams of the same tie group
+tied_team_games as (
+
+    select
+        home_team.season,
+        home_team.ranking_date,
+        home_team.tie_group_id,
+        games.game_date,
+        games.game_id,
+        games.home_team_id,
+        games.away_team_id,
+        games.home_team_score,
+        games.away_team_score,
+        games.last_period_type,
+        {{ nhl_matchups_ids() }} as matchup_id
+    from games
+    join standings home_team
+        on  home_team.team_id = games.home_team_id
+        and home_team.season = games.season
+        and games.game_date <= home_team.ranking_date
+    join standings away_team
+        on  away_team.team_id = games.away_team_id
+        and away_team.season = home_team.season
+        and away_team.ranking_date = home_team.ranking_date
+        and away_team.tie_group_id = home_team.tie_group_id
+    where home_team.tie_group_id is not null
+
+),
+
+matchup_games as (
+
     select
         season,
         ranking_date,
@@ -39,135 +59,137 @@ CTE_BASE as (
         away_team_score,
         last_period_type,
         count(*) over (partition by season, ranking_date, tie_group_id, matchup_id) as matchup_game_count
-    from CTE_DEDUP_GAMES_TIED_TEAMS
+    from tied_team_games
+
 ),
 
-CTE_HOME_COUNTS as (
+-- Number of home games of each team, per matchup
+home_game_counts as (
+
     select
         season,
         ranking_date,
         tie_group_id,
         matchup_id,
         home_team_id,
-        count(*) as home_count
-    from CTE_BASE
+        count(*) as home_game_count
+    from matchup_games
     group by season, ranking_date, tie_group_id, matchup_id, home_team_id
+
 ),
 
-CTE_TOP_HOME as (
+-- Team with the most home games in each matchup
+top_home_teams as (
+
     select
         season,
         ranking_date,
         tie_group_id,
         matchup_id,
-        home_team_id as top_home_team_id,
-        row_number() over (
-            partition by season, ranking_date, tie_group_id, matchup_id
-            order by home_count desc, home_team_id
-        ) as rn
-    from CTE_HOME_COUNTS
+        home_team_id as top_home_team_id
+    from home_game_counts
+    qualify row_number() over (
+        partition by season, ranking_date, tie_group_id, matchup_id
+        order by home_game_count desc, home_team_id
+    ) = 1
+
 ),
 
-CTE_TOP_HOME_FINAL as (
-    select season, ranking_date, tie_group_id, matchup_id, top_home_team_id
-    from CTE_TOP_HOME
-    where rn = 1
+-- Oldest game hosted by that team
+oldest_top_home_games as (
+
+    select
+        matchup_games.season,
+        matchup_games.ranking_date,
+        matchup_games.tie_group_id,
+        matchup_games.matchup_id,
+        matchup_games.game_id
+    from matchup_games
+    join top_home_teams
+        on  matchup_games.season = top_home_teams.season
+        and matchup_games.ranking_date = top_home_teams.ranking_date
+        and matchup_games.tie_group_id = top_home_teams.tie_group_id
+        and matchup_games.matchup_id = top_home_teams.matchup_id
+        and matchup_games.home_team_id = top_home_teams.top_home_team_id
+    qualify row_number() over (
+        partition by matchup_games.season, matchup_games.ranking_date,
+                     matchup_games.tie_group_id, matchup_games.matchup_id
+        order by matchup_games.game_date, matchup_games.game_id
+    ) = 1
+
 ),
 
-CTE_OLDEST_GAME AS (
-    SELECT
-        B.SEASON,
-        B.RANKING_DATE,
-        B.TIE_GROUP_ID,
-        B.MATCHUP_ID,
-        B.GAME_ID,
-        ROW_NUMBER() OVER (
-            PARTITION BY B.SEASON, B.RANKING_DATE, B.TIE_GROUP_ID, B.MATCHUP_ID 
-            ORDER BY B.GAME_DATE ASC, B.GAME_ID
-        ) AS RN_OLDEST
-    FROM CTE_BASE B
-    INNER JOIN CTE_TOP_HOME_FINAL T
-        ON  B.SEASON = T.SEASON                              
-        AND B.RANKING_DATE = T.RANKING_DATE                  
-        AND B.TIE_GROUP_ID = T.TIE_GROUP_ID                  
-        AND B.MATCHUP_ID = T.MATCHUP_ID
-        AND B.HOME_TEAM_ID = T.TOP_HOME_TEAM_ID
+-- Odd number of games: the oldest game at the top home team doesn't count
+counted_games as (
+
+    select matchup_games.*
+    from matchup_games
+    left join oldest_top_home_games
+        on  matchup_games.season = oldest_top_home_games.season
+        and matchup_games.ranking_date = oldest_top_home_games.ranking_date
+        and matchup_games.tie_group_id = oldest_top_home_games.tie_group_id
+        and matchup_games.matchup_id = oldest_top_home_games.matchup_id
+        and matchup_games.game_id = oldest_top_home_games.game_id
+    where matchup_games.matchup_game_count % 2 = 0
+       or oldest_top_home_games.game_id is null
+
 ),
 
-CTE_LABELED_GAMES AS (
-    SELECT
-        B.*,
-        CASE
-            WHEN B.MATCHUP_GAME_COUNT % 2 = 0 THEN 1
-            WHEN OG.RN_OLDEST = 1 THEN 0
-            ELSE 1
-        END AS FLAG
-    FROM CTE_BASE B
-    LEFT JOIN CTE_OLDEST_GAME OG
-        ON  B.SEASON = OG.SEASON                          
-        AND B.RANKING_DATE = OG.RANKING_DATE                  
-        AND B.TIE_GROUP_ID = OG.TIE_GROUP_ID                 
-        AND B.MATCHUP_ID = OG.MATCHUP_ID
-        AND B.GAME_ID = OG.GAME_ID
-        AND OG.RN_OLDEST = 1
+-- One row per team per counted game
+team_games as (
+
+    select
+        season,
+        ranking_date,
+        tie_group_id,
+        game_id,
+        home_team_id        as team_id,
+        home_team_score     as team_score,
+        away_team_score     as opponent_score,
+        last_period_type
+    from counted_games
+
+    union all
+
+    select
+        season,
+        ranking_date,
+        tie_group_id,
+        game_id,
+        away_team_id        as team_id,
+        away_team_score     as team_score,
+        home_team_score     as opponent_score,
+        last_period_type
+    from counted_games
+
 ),
 
-CTE_TEAM_GAMES AS (
-    SELECT
-        SEASON,
-        RANKING_DATE,
-        TIE_GROUP_ID,
-        GAME_ID,
-        HOME_TEAM_ID    AS TEAM_ID,
-        HOME_TEAM_SCORE AS TEAM_SCORE,
-        AWAY_TEAM_SCORE AS OPPONENT_SCORE,
-        LAST_PERIOD_TYPE
-    FROM CTE_LABELED_GAMES
-    WHERE FLAG = 1
+team_stats as (
 
-    UNION ALL
+    select
+        season,
+        ranking_date,
+        tie_group_id,
+        team_id,
+        count(distinct game_id) as games_played,
+        sum(
+            case
+                when team_score > opponent_score then 2                             -- win
+                when last_period_type in ('OT', 'SO') then 1                        -- OT or SO loss
+                else 0                                                              -- regulation loss
+            end
+        )                       as points_earned
+    from team_games
+    group by season, ranking_date, tie_group_id, team_id
 
-    SELECT
-        SEASON,
-        RANKING_DATE,
-        TIE_GROUP_ID,
-        GAME_ID,
-        AWAY_TEAM_ID    AS TEAM_ID,
-        AWAY_TEAM_SCORE AS TEAM_SCORE,
-        HOME_TEAM_SCORE AS OPPONENT_SCORE,
-        LAST_PERIOD_TYPE
-    FROM CTE_LABELED_GAMES
-    WHERE FLAG = 1
-),
-
-CTE_TEAM_STATS AS (
-    SELECT
-        SEASON,
-        RANKING_DATE,
-        TIE_GROUP_ID,
-        TEAM_ID,
-        COUNT(DISTINCT GAME_ID) AS GAMES_PLAYED,
-        SUM(
-            CASE
-                -- Win
-                WHEN TEAM_SCORE > OPPONENT_SCORE THEN 2
-                -- Loss in OT or SO
-                WHEN TEAM_SCORE < OPPONENT_SCORE
-                     AND LAST_PERIOD_TYPE IN ('OT', 'SO') THEN 1
-                -- Regulation loss
-                ELSE 0
-            END
-        ) AS POINTS_EARNED
-    FROM CTE_TEAM_GAMES
-    GROUP BY SEASON, RANKING_DATE, TIE_GROUP_ID, TEAM_ID
 )
 
-SELECT
-    SEASON,
-    RANKING_DATE,
-    TIE_GROUP_ID,
-    TEAM_ID,
-    POINTS_EARNED,
-    GAMES_PLAYED,
-    POINTS_EARNED / (GAMES_PLAYED * 2) AS TIE_RATE
-FROM CTE_TEAM_STATS
+select
+    season,
+    ranking_date,
+    tie_group_id,
+    team_id,
+    points_earned,
+    games_played,
+    points_earned / (games_played * 2) as tie_rate
+from team_stats

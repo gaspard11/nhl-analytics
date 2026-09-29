@@ -12,6 +12,6 @@
 select
     player_id,
     team_id
-from {{ ref('nhl_players') }}
+from {{ ref('dim_players') }}
 
 {% endsnapshot %}

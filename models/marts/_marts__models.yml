@@ -1,14 +1,24 @@
 version: 2
 
 models:
-  - name: league_rankings
-    description: League standings per day, after every NHL tie-breaker. One row per team per ranking date.
+  - name: fct_league_rankings
+    description: >
+      League standings per day, after every NHL tie-breaker. One row per team per ranking date,
+      from day 0 of each season. Cumulative: each row holds season-to-date totals.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['season', 'ranking_date', 'team_id']
     columns:
+      - name: ranking_date
+        description: "{{ doc('ranking_date') }}"
+      - name: season
+        description: "{{ doc('season') }}"
       - name: ranking
+        description: >
+          League rank that day (1 = first), after all tie-breakers: points, fewer games played,
+          regulation wins, regulation + OT wins, total wins, head-to-head points %, goal differential,
+          goals for. Teams still equal after all of them share a rank. On day 0 every team is ranked 32.
         data_tests:
           - not_null
           - dbt_utils.accepted_range:
@@ -16,73 +26,199 @@ models:
                 min_value: 1
                 max_value: 32
       - name: team_id
+        description: "{{ doc('team_id') }}"
         data_tests:
           - not_null
           - relationships:
               arguments:
-                to: ref('nhl_teams_definition')
+                to: ref('dim_teams')
                 field: team_id
+      - name: points
+        description: Season-to-date points. Win = 2, overtime or shootout loss = 1, regulation loss = 0.
+      - name: goals_for
+        description: Season-to-date goals scored. A shootout win counts as one goal, as in the NHL standings.
+      - name: goals_against
+        description: Season-to-date goals conceded. A shootout loss counts as one goal against.
+      - name: goal_diff
+        description: goals_for - goals_against.
+      - name: games_played
+        description: Season-to-date games played.
+      - name: regulation_wins
+        description: Season-to-date wins in regulation (RW).
+      - name: regulation_ot_wins
+        description: Season-to-date wins in regulation or overtime, i.e. excluding shootout wins (ROW).
+      - name: total_wins
+        description: Season-to-date wins, including shootout wins.
+      - name: tie_rate
+        description: >
+          Head-to-head points % (between 0 and 1) against the other teams tied with this one on points,
+          games played, RW, ROW and wins that day. Only used as a tie-breaker; 0 when the team isn't tied.
+      - name: _batch_loaded_at
+        description: "{{ doc('batch_loaded_at') }}"
 
-  - name: players_goals_rankings
+  - name: fct_player_goals_rankings
     description: Goals ranking per day. Only players with at least one goal this season.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['season', 'ranking_date', 'player_id']
     columns:
+      - name: ranking_date
+        description: "{{ doc('ranking_date') }}"
+      - name: season
+        description: "{{ doc('season') }}"
       - name: ranking
+        description: "{{ doc('player_ranking') }}"
         data_tests:
           - not_null
+      - name: player_id
+        description: "{{ doc('player_id') }}"
+      - name: number_of_goals
+        description: Season-to-date goals, shootout goals excluded.
+      - name: _batch_loaded_at
+        description: "{{ doc('batch_loaded_at') }}"
 
-  - name: players_assists_rankings
+  - name: fct_player_assists_rankings
     description: Assists ranking per day. Only players with at least one assist this season.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['season', 'ranking_date', 'player_id']
     columns:
+      - name: ranking_date
+        description: "{{ doc('ranking_date') }}"
+      - name: season
+        description: "{{ doc('season') }}"
       - name: ranking
+        description: "{{ doc('player_ranking') }}"
         data_tests:
           - not_null
+      - name: player_id
+        description: "{{ doc('player_id') }}"
+      - name: number_of_assists
+        description: Season-to-date assists (first and second assists both count).
+      - name: _batch_loaded_at
+        description: "{{ doc('batch_loaded_at') }}"
 
-  - name: players_points_rankings
-    description: Points (goals + assists) ranking per day.
+  - name: fct_player_points_rankings
+    description: Points (goals + assists) ranking per day. Only players with at least one point this season.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['season', 'ranking_date', 'player_id']
     columns:
+      - name: ranking_date
+        description: "{{ doc('ranking_date') }}"
+      - name: season
+        description: "{{ doc('season') }}"
       - name: ranking
+        description: "{{ doc('player_ranking') }}"
         data_tests:
           - not_null
+      - name: player_id
+        description: "{{ doc('player_id') }}"
+      - name: number_of_points
+        description: Season-to-date points = goals + assists.
+      - name: _batch_loaded_at
+        description: "{{ doc('batch_loaded_at') }}"
 
-  - name: games_history
-    description: One row per finished game.
+  - name: fct_games
+    description: One row per finished regular-season game.
     columns:
       - name: game_id
+        description: "{{ doc('game_id') }}"
         data_tests:
           - unique
           - not_null
+      - name: season
+        description: "{{ doc('season') }}"
+      - name: game_date
+        description: "{{ doc('game_date') }}"
+      - name: game_state
+        description: NHL game state id. Always 7 (final), since only finished games are kept.
+      - name: home_team_id
+        description: "{{ doc('team_id') }}"
+      - name: home_team_score
+        description: Final score of the home team. Includes one goal for the winner of a shootout.
+      - name: away_team_id
+        description: "{{ doc('team_id') }}"
+      - name: away_team_score
+        description: Final score of the away team. Includes one goal for the winner of a shootout.
+      - name: last_period_type
+        description: "{{ doc('last_period_type') }}"
+      - name: fetched_at
+        description: "{{ doc('fetched_at') }}"
 
-  - name: games_stats
-    description: One row per non-shootout goal.
+  - name: fct_goals
+    description: One row per goal of a finished game, shootout goals excluded.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['game_id', 'event_id']
+    columns:
+      - name: game_id
+        description: "{{ doc('game_id') }}"
+      - name: event_id
+        description: Id of the goal event within the game's play-by-play.
+      - name: team_id
+        description: Team that scored the goal. Joins to `dim_teams.team_id`.
+      - name: situation_code
+        description: "{{ doc('situation_code') }}"
+      - name: home_score
+        description: Home team score right after this goal.
+      - name: away_score
+        description: Away team score right after this goal.
+      - name: scoring_player_id
+        description: Player who scored. Joins to `dim_players.player_id`.
+      - name: assist1_player_id
+        description: Player credited with the first assist. Null for an unassisted goal.
+      - name: assist2_player_id
+        description: Player credited with the second assist. Null when there is at most one assist.
+      - name: period_number
+        description: Period of the goal (1-3 = regulation, 4 = overtime).
+      - name: time_in_period
+        description: Time elapsed in the period when the goal was scored, as `MM:SS`.
+      - name: time_remaining_in_period
+        description: Time left in the period when the goal was scored, as `MM:SS`.
+      - name: fetched_at
+        description: "{{ doc('fetched_at') }}"
 
-  - name: nhl_players
+  - name: dim_players
     description: One row per player who has recorded a point, with the team of their most recent game with a point.
     columns:
       - name: player_id
+        description: "{{ doc('player_id') }}"
         data_tests:
           - unique
           - not_null
+      - name: first_name
+        description: Player's first name.
+      - name: last_name
+        description: Player's last name.
+      - name: position
+        description: Position code from the NHL API. C = center, L = left wing, R = right wing, D = defense, G = goalie.
+      - name: team_id
+        description: >
+          Team of the player's most recent game with a goal or assist. Joins to `dim_teams.team_id`.
+          Changes over time are tracked in the snapshot `nhl_players_team_snapshot`.
+      - name: headshot_url
+        description: URL of the player's headshot image on the NHL site.
+      - name: fetched_at
+        description: "{{ doc('fetched_at') }}"
 
-  - name: nhl_teams_definition
-    description: The 32 NHL teams, from the NHL_TEAMS seed.
+  - name: dim_teams
+    description: The 32 NHL teams, from the nhl_teams seed.
     columns:
       - name: team_id
+        description: "{{ doc('team_id') }}"
         data_tests:
           - unique
           - not_null
+      - name: conference_name
+        description: Conference (Eastern or Western).
+      - name: division_name
+        description: Division (Atlantic, Metropolitan, Central or Pacific).
+      - name: logo_url
+        description: URL of the team's logo (SVG) on the NHL site.
+      - name: name
+        description: Full team name, e.g. Colorado Avalanche.
