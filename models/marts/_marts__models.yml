@@ -1,0 +1,88 @@
+version: 2
+
+models:
+  - name: league_rankings
+    description: League standings per day, after every NHL tie-breaker. One row per team per ranking date.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['season', 'ranking_date', 'team_id']
+    columns:
+      - name: ranking
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 32
+      - name: team_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('nhl_teams_definition')
+                field: team_id
+
+  - name: players_goals_rankings
+    description: Goals ranking per day. Only players with at least one goal this season.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['season', 'ranking_date', 'player_id']
+    columns:
+      - name: ranking
+        data_tests:
+          - not_null
+
+  - name: players_assists_rankings
+    description: Assists ranking per day. Only players with at least one assist this season.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['season', 'ranking_date', 'player_id']
+    columns:
+      - name: ranking
+        data_tests:
+          - not_null
+
+  - name: players_points_rankings
+    description: Points (goals + assists) ranking per day.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['season', 'ranking_date', 'player_id']
+    columns:
+      - name: ranking
+        data_tests:
+          - not_null
+
+  - name: games_history
+    description: One row per finished game.
+    columns:
+      - name: game_id
+        data_tests:
+          - unique
+          - not_null
+
+  - name: games_stats
+    description: One row per non-shootout goal.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['game_id', 'event_id']
+
+  - name: nhl_players
+    description: One row per player who has recorded a point, with the team of their most recent game with a point.
+    columns:
+      - name: player_id
+        data_tests:
+          - unique
+          - not_null
+
+  - name: nhl_teams_definition
+    description: The 32 NHL teams, from the NHL_TEAMS seed.
+    columns:
+      - name: team_id
+        data_tests:
+          - unique
+          - not_null

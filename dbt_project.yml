@@ -6,8 +6,8 @@ name: 'nhl_analytics'
 version: '1.0.0'
 config-version: 2
 
-# Snapshot `schema` config (without target_schema) needs dbt 1.9+
-require-dbt-version: ">=1.9.0"
+# Generic test `arguments:` syntax needs dbt 1.10+ (or dbt Fusion)
+require-dbt-version: ">=1.10.0"
 
 # This setting configures which "profile" dbt uses for this project.
 # Only used by dbt Core; dbt Cloud uses the environment's connection.
