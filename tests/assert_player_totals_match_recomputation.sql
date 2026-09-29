@@ -35,8 +35,8 @@ goals as (
         p.scoring_player_id,
         p.assist1_player_id,
         p.assist2_player_id
-    from {{ ref('stg_games_pbp') }} p
-    join {{ ref('stg_games') }} g
+    from {{ ref('stg_nhl_api__goals') }} p
+    join {{ ref('stg_nhl_api__games') }} g
         on g.game_id = p.game_id
 
 ),

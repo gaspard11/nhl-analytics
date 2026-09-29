@@ -1,7 +1,7 @@
 version: 2
 
 models:
-  - name: stg_games
+  - name: stg_nhl_api__games
     description: One row per finished regular-season game, from the latest load of that game in GAMES_RAW.
     columns:
       - name: game_id
@@ -9,7 +9,7 @@ models:
           - unique
           - not_null
       - name: season
-        description: Season as an 8-digit integer, e.g. 20252026.
+        description: "{{ doc('season') }}"
         data_tests:
           - not_null
       - name: game_date
@@ -20,23 +20,23 @@ models:
           - not_null
           - relationships:
               arguments:
-                to: ref('NHL_TEAMS')
+                to: ref('nhl_teams')
                 field: team_id
       - name: away_team_id
         data_tests:
           - not_null
           - relationships:
               arguments:
-                to: ref('NHL_TEAMS')
+                to: ref('nhl_teams')
                 field: team_id
       - name: last_period_type
-        description: How the game ended. REG = regulation, OT = overtime, SO = shootout.
+        description: "{{ doc('last_period_type') }}"
         data_tests:
           - accepted_values:
               arguments:
                 values: ['REG', 'OT', 'SO']
 
-  - name: stg_games_pbp
+  - name: stg_nhl_api__goals
     description: One row per non-shootout goal, from the latest play-by-play load of each game.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
@@ -52,8 +52,10 @@ models:
       - name: scoring_player_id
         data_tests:
           - not_null
+      - name: situation_code
+        description: "{{ doc('situation_code') }}"
 
-  - name: stg_players_info
+  - name: stg_nhl_api__players
     description: One row per player, from the latest load of that player in PLAYERS_INFO_RAW.
     columns:
       - name: player_id

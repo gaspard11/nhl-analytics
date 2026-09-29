@@ -22,7 +22,7 @@ with ordered as (
         {{ metric }},
         lag({{ metric }}) over (partition by season, team_id order by ranking_date) as previous_{{ metric }}{% if not loop.last %},{% endif %}
         {%- endfor %}
-    from {{ ref('league_rankings') }}
+    from {{ ref('fct_league_rankings') }}
 
 )
 

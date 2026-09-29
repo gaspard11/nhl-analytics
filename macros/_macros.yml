@@ -1,0 +1,54 @@
+version: 2
+
+macros:
+  - name: generate_schema_name
+    description: >
+      Overrides dbt's default schema naming. In dbt Cloud production runs
+      (DBT_CLOUD_INVOCATION_CONTEXT = prod), a model with a custom schema is built in that schema as-is
+      (e.g. MARTS). Everywhere else (IDE, CI, local), it's built in <target schema>_<custom schema>
+      (e.g. DBT_GROBERT_MARTS), so non-production runs can never overwrite production tables.
+    arguments:
+      - name: custom_schema_name
+        type: string
+        description: The schema set in the model's config or dbt_project.yml (e.g. marts). None when not set.
+      - name: node
+        type: object
+        description: The node being built. Not used.
+
+  - name: nhl_tie_group_id
+    description: >
+      Returns an id shared by the teams tied on every tie-breaker before head-to-head (points, games played,
+      regulation wins, regulation + OT wins, total wins) on the same ranking date, and null for teams that
+      aren't tied. Must be used in a select, as it relies on a window function.
+    arguments:
+      - name: ranking_date
+        type: string
+        description: Column holding the ranking date. Default 'game_date'.
+      - name: points
+        type: string
+        description: Column holding the points. Default 'cumul_points'.
+      - name: games_played
+        type: string
+        description: Column holding the games played. Default 'games_played'.
+      - name: regulation_wins
+        type: string
+        description: Column holding the regulation wins. Default 'regulation_wins'.
+      - name: regulation_ot_wins
+        type: string
+        description: Column holding the regulation + OT wins. Default 'regulation_ot_wins'.
+      - name: total_wins
+        type: string
+        description: Column holding the total wins. Default 'total_wins'.
+
+  - name: nhl_matchups_ids
+    description: >
+      Returns an id for a pair of teams that doesn't depend on which one is home or away
+      (surrogate key of the smaller and larger team id), so every game between the same two teams
+      gets the same matchup id.
+    arguments:
+      - name: home_team_id
+        type: string
+        description: Column holding the home team id. Default 'home_team_id'.
+      - name: away_team_id
+        type: string
+        description: Column holding the away team id. Default 'away_team_id'.
