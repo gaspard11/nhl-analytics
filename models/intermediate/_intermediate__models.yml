@@ -1,0 +1,63 @@
+version: 2
+
+models:
+  - name: int_team_game_results
+    description: One row per team per finished game (home and away sides unioned), with the result from that team's point of view.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['game_id', 'team_id']
+    columns:
+      - name: points
+        description: 2 for a win, 1 for an overtime or shootout loss, 0 for a regulation loss.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1, 2]
+                quote: false
+
+  - name: int_league_ranking_pre_tie_breaker
+    description: >
+      Cumulative state table (incremental): season-to-date totals per team for every game date,
+      plus day 0, before the head-to-head tie-breaker.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['season', 'ranking_date', 'team_id']
+    columns:
+      - name: tie_group_id
+        description: >
+          Shared by teams equal on points, games played, regulation wins, regulation + OT wins
+          and total wins on the same day. Null when the team is not tied.
+
+  - name: int_tied_teams_rate
+    description: >
+      Head-to-head points % of each tied team against the other teams of its tie group,
+      in games played so far this season. Odd series exclude one game (NHL rule).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['season', 'ranking_date', 'tie_group_id', 'team_id']
+    columns:
+      - name: tie_rate
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+
+  - name: int_player_scoring_cumulative
+    description: >
+      Cumulative state table (incremental): season-to-date goals and assists per player for every
+      game date, from the player's first point of the season.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['season', 'ranking_date', 'player_id']
+    columns:
+      - name: number_of_points
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
