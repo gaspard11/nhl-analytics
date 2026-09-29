@@ -2,7 +2,7 @@
 
 {{
     config(
-      target_schema='snapshots',
+      schema='snapshots',
       unique_key='player_id',
       strategy='check',
       check_cols=['team_id'],
