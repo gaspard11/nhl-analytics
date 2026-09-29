@@ -16,3 +16,5 @@ select
     fetched_at
 from {{ source('nhl_raw', 'GAMES_RAW') }},
      lateral flatten(input => raw_payload:data) g
+WHERE g.value:gameStateId::int = 7
+qualify row_number() over (partition by g.value:id::int order by fetched_at desc) = 1
