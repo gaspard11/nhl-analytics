@@ -12,7 +12,7 @@ select
     sum(games_played)  as league_team_games,
     sum(goals_for)     as league_goals_for,
     sum(goals_against) as league_goals_against
-from {{ ref('league_rankings') }}
+from {{ ref('fct_league_rankings') }}
 group by season, ranking_date
 having sum(total_wins) * 2 <> sum(games_played)
     or sum(goals_for) <> sum(goals_against)

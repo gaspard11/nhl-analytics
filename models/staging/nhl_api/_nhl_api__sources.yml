@@ -1,0 +1,14 @@
+version: 2
+
+sources:
+  - name: nhl_raw
+    description: Raw JSON payloads from the NHL API, loaded by the Airflow DAG nhl_raw_pipeline. Every load is kept.
+    database: NHL_RAW
+    schema: RAW
+    tables:
+      - name: GAMES_RAW
+        description: One NHL stats API payload (all regular-season games of one date) per load.
+      - name: GAMES_PBP_RAW
+        description: One play-by-play payload (one game) per load.
+      - name: PLAYERS_INFO_RAW
+        description: One player landing payload per load. Only loaded for players not yet in dim_players.

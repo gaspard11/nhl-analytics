@@ -1,7 +1,7 @@
 version: 2
 
 seeds:
-  - name: NHL_TEAMS
+  - name: nhl_teams
     description: The 32 NHL teams, with conference, division and logo.
     config:
       column_types:

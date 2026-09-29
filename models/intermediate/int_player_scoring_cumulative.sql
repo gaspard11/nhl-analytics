@@ -5,7 +5,6 @@
     on_schema_change='fail'
 ) }}
 
-
 -- Season-to-date goals and assists per player, for every game date.
 -- A player appears from the day of their first point of the season.
 
@@ -16,7 +15,7 @@ with games as (
         season,
         game_date,
         fetched_at
-    from {{ ref('stg_games') }}
+    from {{ ref('stg_nhl_api__games') }}
 
 ),
 
@@ -32,7 +31,7 @@ goals as (
         p.assist1_player_id,
         p.assist2_player_id,
         greatest(p.fetched_at, g.fetched_at) as fetched_at
-    from {{ ref('stg_games_pbp') }} p
+    from {{ ref('stg_nhl_api__goals') }} p
     join games g
         on g.game_id = p.game_id
 
@@ -107,7 +106,7 @@ batch_players as (
     union
     {% endif %}
 
-    select
+    select distinct
         e.season,
         e.player_id
     from player_events e

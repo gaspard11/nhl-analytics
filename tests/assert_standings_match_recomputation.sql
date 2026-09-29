@@ -1,4 +1,4 @@
--- On the latest ranking date of each season, the cumulative totals in league_rankings must equal
+-- On the latest ranking date of each season, the cumulative totals in fct_league_rankings must equal
 -- a recomputation from scratch over the game history (int_team_game_results is stateless).
 -- Catches drift from incremental runs: a day counted twice, a day skipped, a bad re-run.
 -- Returns the teams whose stored totals differ from the recomputed ones.
@@ -18,7 +18,7 @@ with latest as (
     select
         season,
         max(ranking_date) as ranking_date
-    from {{ ref('league_rankings') }}
+    from {{ ref('fct_league_rankings') }}
     group by season
 
 ),
@@ -31,7 +31,7 @@ stored as (
         {%- for metric in metrics %}
         r.{{ metric }}{% if not loop.last %},{% endif %}
         {%- endfor %}
-    from {{ ref('league_rankings') }} r
+    from {{ ref('fct_league_rankings') }} r
     join latest l
         on l.season = r.season
        and l.ranking_date = r.ranking_date
