@@ -5,5 +5,8 @@ select
     conference_name,
     division_name,
     logo_url,
-    name
+    name,
+    arena_name,
+    arena_longitude,
+    arena_latitude
 from {{ ref('nhl_teams') }}

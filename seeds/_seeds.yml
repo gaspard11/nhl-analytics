@@ -2,7 +2,7 @@ version: 2
 
 seeds:
   - name: nhl_teams
-    description: The 32 NHL teams, with conference, division and logo.
+    description: The 32 NHL teams, with conference, division, logo and home arena (name and coordinates).
     config:
       column_types:
         TEAM_ID: integer
@@ -10,3 +10,6 @@ seeds:
         DIVISION_NAME: varchar
         LOGO_URL: varchar
         NAME: varchar
+        ARENA_NAME: varchar
+        ARENA_LONGITUDE: number(9,6)
+        ARENA_LATITUDE: number(9,6)
