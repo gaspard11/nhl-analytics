@@ -222,3 +222,23 @@ models:
         description: URL of the team's logo (SVG) on the NHL site.
       - name: name
         description: Full team name, e.g. Colorado Avalanche.
+      - name: arena_name
+        description: Current name of the team's home arena, e.g. Ball Arena. Sponsor names change over time.
+        data_tests:
+          - not_null
+      - name: arena_longitude
+        description: Longitude (WGS84, decimal degrees) of the team's home arena. Negative = west.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: -180
+                max_value: 180
+      - name: arena_latitude
+        description: Latitude (WGS84, decimal degrees) of the team's home arena.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: -90
+                max_value: 90
