@@ -3,24 +3,24 @@ from airflow.providers.snowflake.hooks.snowflake import SnowflakeHook
 from airflow.models.param import Param
 from airflow.providers.dbt.cloud.operators.dbt import DbtCloudRunJobOperator
 from airflow.operators.empty import EmptyOperator
-from airflow.decorators import task
+from airflow.exceptions import AirflowSkipException
 
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
 import json
 
 @dag(
     dag_id="nhl_raw_pipeline",
-    schedule=None,          # run manually for now, no auto-schedule yet
+    schedule="15 10 * * *",  # 10:15 UTC daily; the VM's instance schedule starts it at 10:00
     start_date=datetime(2026, 1, 1),
     catchup=False,
     tags=["nhl", "learning"],
     params={
         "game_date": Param(
-            default="now",          # keep "now" as a safe fallback
+            default="yesterday",
             type="string",
-            description="Date to fetch NHL scores for (YYYY-MM-DD), or 'now' for today",
+            description="Date to fetch NHL scores for (YYYY-MM-DD), or 'yesterday' for the day before the run",
         )
     }
 )
@@ -28,7 +28,11 @@ def nhl_raw_pipeline():
 
     @task
     def extract_nhl_data(**kwargs):
-        game_date = kwargs["params"]["game_date"].replace('-','')
+        game_date = kwargs["params"]["game_date"]
+        if game_date == "yesterday":
+            # Scheduled runs fire the morning after the games, so fetch the previous day
+            game_date = (kwargs["dag_run"].run_after - timedelta(days=1)).strftime("%Y-%m-%d")
+        game_date = game_date.replace('-','')
         # Simple endpoint: today's NHL schedule/scores
         url = f"https://api.nhle.com/stats/rest/en/game?cayenneExp=gameDate=%22{game_date}%22%20and%20gameType=2"
         response = requests.get(url)
@@ -129,6 +133,28 @@ def nhl_raw_pipeline():
 
     skip_dbt = EmptyOperator(task_id="skip_dbt")
 
+    # all_done: shut the VM down even if an upstream task failed, so it never keeps billing
+    @task(trigger_rule="all_done")
+    def stop_vm(**kwargs):
+        # Only scheduled runs stop the VM, so manual runs from the UI keep it up
+        if kwargs["dag_run"].run_type != "scheduled":
+            raise AirflowSkipException("Not a scheduled run: leaving the VM up")
+
+        # The GCE metadata server gives this VM's identity and a token for its service account
+        metadata = "http://169.254.169.254/computeMetadata/v1"
+        headers = {"Metadata-Flavor": "Google"}
+        token = requests.get(f"{metadata}/instance/service-accounts/default/token", headers=headers, timeout=5).json()["access_token"]
+        project = requests.get(f"{metadata}/project/project-id", headers=headers, timeout=5).text
+        zone = requests.get(f"{metadata}/instance/zone", headers=headers, timeout=5).text.split("/")[-1]
+        name = requests.get(f"{metadata}/instance/name", headers=headers, timeout=5).text
+
+        response = requests.post(
+            f"https://compute.googleapis.com/compute/v1/projects/{project}/zones/{zone}/instances/{name}/stop",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+        response.raise_for_status()
+
 
     games_payload = extract_nhl_data()  
 
@@ -158,7 +184,7 @@ def nhl_raw_pipeline():
     branch = check_has_games(games_payload)
 
     [load_games, load_game_infos, load_player_infos] >> branch
-    branch >> [run_dbt, skip_dbt]
+    branch >> [run_dbt, skip_dbt] >> stop_vm()
 
     
 
