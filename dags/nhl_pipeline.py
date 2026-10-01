@@ -72,7 +72,8 @@ def nhl_raw_pipeline():
             assisters1 = [int(play['details']['assist1PlayerId']) for play in payload.get("plays",[]) if play['typeDescKey'] == 'goal' and 'assist1PlayerId' in play['details']]
             assisters2 = [int(play['details']['assist2PlayerId']) for play in payload.get("plays",[]) if play['typeDescKey'] == 'goal' and 'assist2PlayerId' in play['details']]
             player_ids+= list(set(scorers + assisters1+ assisters2))
-        return player_ids
+        # A player with points in several games that day would otherwise be fetched and loaded once per game
+        return list(set(player_ids))
 
     @task
     def extract_player_infos(player_id: int):
@@ -81,7 +82,7 @@ def nhl_raw_pipeline():
         cursor = conn.cursor()
 
         cursor.execute(
-            "SELECT 1 FROM NHL_ANALYTICS.MARTS.NHL_PLAYERS WHERE PLAYER_ID = %s LIMIT 1",
+            "SELECT 1 FROM NHL_ANALYTICS.MARTS.DIM_PLAYERS WHERE PLAYER_ID = %s LIMIT 1",
             (player_id,)
         )
         row_exists = cursor.fetchone() is not None
