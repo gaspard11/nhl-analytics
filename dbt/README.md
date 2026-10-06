@@ -196,53 +196,6 @@ They are in `tests/`. Each one returns the rows that break its rule, so a passin
 | `assert_league_totals_balance` | `fct_league_rankings` | For the whole league on every day: 2 × the sum of `total_wins` = the sum of `games_played` (one winner per game, two teams per game), and the sum of `goals_for` = the sum of `goals_against`. Catches a game counted for only one of its two teams |
 | `assert_pbp_goals_match_final_score` | `stg_nhl_api__goals` | For every finished game, the number of goals in the play by play equals `home_team_score` + `away_team_score`, minus 1 for a game decided in a shootout (the final score gives the shootout winner one goal, but shootout goals are not in the play by play). Catches a play by play loaded before the end of the game, or never loaded |
 
-To look at the failing rows, add `--store-failures` and query `DBT_<you>_DBT_TEST__AUDIT.<test name>`.
-
-## Runbook
-
-### Load or reload a date
-
-Trigger the Airflow DAG `nhl_raw_pipeline` with `game_date = YYYY-MM-DD`. Reloading is safe: staging keeps the latest load, and the next `dbt build` recomputes that date and every date after it.
-
-### A load was interrupted or is wrong
-
-This usually shows up as `assert_pbp_goals_match_final_score` failing for every game of one date. Either reload the date (see above), or delete it from raw and rebuild:
-
-```sql
-create table NHL_RAW.RAW.GAMES_RAW_BKP clone NHL_RAW.RAW.GAMES_RAW;   -- backup first
-delete from NHL_RAW.RAW.GAMES_RAW
-where raw_payload:data[0]:gameDate::date = '<YYYY-MM-DD>';
-```
-
-Then run `dbt build --full-refresh`. Don't delete rows from the cumulative tables by hand: the days after would still include the deleted games.
-
-### When to use `--full-refresh`
-
-Only when it is needed, run by hand, never in the scheduled job:
-
-* a column was added, removed or changed type in an incremental model (`on_schema_change='fail'` stops the run on purpose),
-* raw data was corrected in the past (see above).
-
-Before a full refresh in production, back up the tables. A zero copy clone is instant:
-
-```sql
-create schema NHL_ANALYTICS.MARTS_BKP clone NHL_ANALYTICS.MARTS;
-```
-
-### Deploying a change
-
-1. Work in a branch and run `dbt build` in the dbt Cloud IDE (development schemas).
-2. Open a pull request and merge it into `main`.
-3. The next production run uses `main`. If the change needs a full refresh, run the production job once with `dbt build --full-refresh -s <model>+`.
-
-## Conventions
-
-* Layers: `stg_<source>__<entity>`, then `int_<description>`, then `fct_<facts>` and `dim_<entities>`.
-* One YAML file per folder (`_<folder>__models.yml`) with the descriptions and tests. Descriptions shared by several models are in `models/_docs.md`.
-* SQL: lowercase keywords and CTE names, import CTEs at the top, explicit columns in the marts, and a comment at the top of every model.
-* Schema and materialization are set per folder in `dbt_project.yml`. A model's `config()` only holds what is specific to it (incremental strategy, keys).
-* Every number coming out of a cumulative model is cast (`::integer`), so its type can't change from one run to the next.
-
 ## Known limitations
 
 * Regular season only: the DAG requests `gameType = 2`, and the `REG` / `OT` / `SO` logic assumes a single overtime period.

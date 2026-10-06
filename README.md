@@ -79,7 +79,7 @@ The DAG lives in [`dags/nhl_pipeline.py`](dags/nhl_pipeline.py). For one game da
 5. Triggers the dbt Cloud production job and waits for it to finish. On a day without games, dbt is skipped.
 6. Stops the VM it runs on.
 
-Scheduled runs use `game_date = yesterday`. Any date can be loaded or reloaded by triggering the DAG by hand with `game_date = YYYY-MM-DD`. Reloading a date is safe, because staging keeps only the latest load of each game.
+The DAG takes the date to load as a parameter. Scheduled runs load the day before, but any past date can be loaded again, which is how I backfilled earlier games. Loading the same date twice does no harm, because staging only keeps the latest load of each game.
 
 Snowflake and dbt Cloud are reached through two Airflow connections (`snowflake_conn_25` and `dbt_conn_gas25`), created on the VM and not stored in the repo.
 
@@ -115,11 +115,11 @@ The dbt project is in [`dbt/`](dbt) and runs in dbt Cloud. It goes from raw JSON
 
 The standings are cumulative and incremental: each run reads the state of the day before the new data and recomputes only the days that changed, instead of the whole season. Singular tests check that these running totals always match a full recomputation from raw.
 
-Models, tests, the incremental logic and a runbook are documented in [`dbt/README.md`](dbt/README.md).
+Models, tests and the incremental logic are documented in [`dbt/README.md`](dbt/README.md).
 
 ## Streamlit app
 
-The app is in [`app/`](app). Run it with `streamlit run app.py` from that folder. It has four pages, switched from a navigation bar at the top. The charts are made with Altair and the tables with Streamlit's own dataframes. Every page has a season and a date picker, so you can go back to any day of a season and see things as they were that day.
+The app is in [`app/`](app). It has four pages, switched from a navigation bar at the top. The charts are made with Altair and the tables with Streamlit's own dataframes. Every page has a season and a date picker, so you can go back to any day of a season and see things as they were that day.
 
 ### Games
 
@@ -135,7 +135,7 @@ The standings table on any date, for the whole league, a conference or a divisio
 
 ### Evolution
 
-Each team's points above .500, game after game: points minus games played, so a team that takes one point per game on average stays at 0. It is a good way to compare teams that haven't played the same number of games. There is one line per team, in its colours, with its logo at the end. On the right, a button per team (logo and abbreviation, grouped by division) highlights its line and fades the others, which is handy when 32 lines are on top of each other. Moving the date back replays the season up to that day, and the axes don't move, so two dates are easy to compare.
+Each team's points above .500, game after game: points minus games played, so a team that takes one point per game on average stays at 0. It is a good way to compare teams that haven't played the same number of games. The idea comes from the standings chart on [MoneyPuck](https://moneypuck.com/standings.htm), which I liked a lot. There is one line per team, in its colours, with its logo at the end. On the right, a button per team (logo and abbreviation, grouped by division) highlights its line and fades the others, which is handy when 32 lines are on top of each other. Moving the date back replays the season up to that day, and the axes don't move, so two dates are easy to compare.
 
 ### Player stats
 
