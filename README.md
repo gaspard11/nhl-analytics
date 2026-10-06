@@ -36,7 +36,7 @@ Most of the bill comes from development rather than from the pipeline: a day of 
 
 ## Disclaimer on AI usage
 
-This project could almost entirely have been vibe coded. The DAG, the dbt models and the Streamlit app are plain code, and an AI assistant could have written nearly all of it, except perhaps the GCP setup and the connections between the tools. That is probably how many people would do it at work to save time, but my goal was to learn. I did use Claude Code, in a way that kept me learning:
+This project could almost entirely have been vibe coded. The DAG, the dbt models and the Streamlit app are plain code, and an AI assistant could have written nearly all of it, save perhaps the GCP setup and the connections between the tools. That is probably how many people would do it at work to save time, but my goal was to learn. I did use Claude Code, in a way that kept me learning:
 
 * **dbt.** I wrote the models, macros and tests myself. I then asked Claude Code to audit the project and recommend how to make it more professional and closer to dbt best practices. I let it do the clean up: renaming files and columns to follow naming conventions, adding comments, and filling the YAML files with descriptions of the models and columns.
 * **Airflow.** I wrote the DAG myself, with Claude on the side as a teacher and to help me debug. The only task Claude Code wrote entirely is `stop_vm`, which shuts down the VM Airflow runs on, a part I knew very little about.
@@ -85,16 +85,16 @@ Snowflake and dbt Cloud are reached through two Airflow connections (`snowflake_
 
 ## Running Airflow on GCP for almost nothing
 
-Airflow needs a machine that is up when the DAG runs. Keeping a VM running all day for a job that takes less than half an hour would cost far more than the job is worth, so the VM is only up for about an hour a day:
+Airflow needs a machine that is on when the DAG runs. The job takes less than half an hour, so paying for a machine that runs all day would be a waste. Instead, the VM is only on for about an hour each morning:
 
-* **Spot e2-medium.** Spot VMs cost a fraction of the normal price. Google can reclaim them, which is acceptable for a job that can simply run again.
-* **Instance schedule.** A GCP instance schedule starts the VM at 10:00 UTC, before the DAG, and stops it at 11:00 UTC as a safety net.
-* **The DAG turns its own machine off.** The last task, `stop_vm`, asks the GCE metadata server for the VM's name, zone and an access token, then calls the Compute Engine API to stop the instance. It runs even when an upstream task failed, so a broken run never leaves the VM billing all day. Manual runs skip it, so the VM stays up while I work in the Airflow UI.
-* **Least privilege.** The VM's service account has a custom role, `vmSelfStop`, that holds a single permission: `compute.instances.stop`. It can turn the VM off and nothing else.
+* **A cheap, interruptible machine.** The VM is a "spot" VM: Google sells its spare capacity at a large discount, with the catch that it can take the machine back at any time. For a daily job that can simply run again, that is a good deal.
+* **It starts on a timer.** GCP starts the VM at 10:00 UTC, just before the DAG, and stops it at 11:00 UTC in case anything went wrong.
+* **It turns itself off.** The last task of the DAG, `stop_vm`, shuts down the machine it runs on as soon as the work is done, even if an earlier task failed. That way a broken run never leaves the VM running (and billing) all day. When I start the DAG by hand, the VM stays on so I can keep working.
+* **It can only turn itself off.** The VM has permission to stop itself and nothing else, so even if someone got into it, they could not touch the rest of the GCP project.
 
-The VM runs a lighter Airflow stack than the local one ([`docker-compose.vm.yaml`](docker-compose.vm.yaml)): LocalExecutor instead of Celery, so no Redis or worker containers, and the Snowflake and dbt Cloud providers are built into the image ([`Dockerfile`](Dockerfile)) instead of being installed on every start. The local [`docker-compose.yaml`](docker-compose.yaml) is the standard CeleryExecutor setup, used for development.
+The VM also runs a lighter version of Airflow than the one I use on my laptop. The standard setup is built to share work across several machines, which is unnecessary for one small daily job, so the VM runs everything in a single place with fewer moving parts ([`docker-compose.vm.yaml`](docker-compose.vm.yaml)). The extra packages Airflow needs to talk to Snowflake and dbt Cloud are installed once, when the image is built ([`Dockerfile`](Dockerfile)), instead of every time the VM starts. This lets Airflow fit on a small, cheap machine and start faster each morning.
 
-The Airflow UI is not exposed to the internet. I reach it through an SSH tunnel from Cloud Shell.
+The Airflow web interface is not open to the internet. I reach it through a secure connection from Google Cloud Shell.
 
 ## Snowflake
 
