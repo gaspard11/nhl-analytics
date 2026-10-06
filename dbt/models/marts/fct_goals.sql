@@ -39,12 +39,14 @@ SELECT
     time_remaining_in_period,
     fetched_at,
   CASE
+    WHEN sc IN ('0101', '1010')                          THEN 'PS'
     WHEN opp_goalie = 0                                  THEN 'EN'
     WHEN own_skaters - (1 - own_goalie) > opp_skaters    THEN 'PPG'
     WHEN own_skaters - (1 - own_goalie) < opp_skaters    THEN 'SHG'
     ELSE 'EV'
   END AS goal_type,
-  
-    CONCAT(own_skaters, ' on ', opp_skaters) as strength
-
+    CASE
+    WHEN sc IN ('0101', '1010') THEN 'Penalty shot'
+    ELSE CONCAT(own_skaters, ' on ', opp_skaters)
+    END AS strength
 FROM sides
