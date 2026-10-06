@@ -102,11 +102,11 @@ Day 0 is the day before a season's first game. Every team is at 0 and ranked las
 
 ### Macros
 
-| Macro | What it does |
-|---|---|
-| `generate_schema_name` | Uses the schema as is in production (`MARTS`) and prefixes it everywhere else (`DBT_<you>_MARTS`) |
-| `nhl_tie_group_id` | Gives the same id to the teams tied on criteria 1 to 5 on the same day |
-| `nhl_matchups_ids` | Gives an id to a pair of teams, whichever one is at home |
+| Macro | What it does | Where it's used |
+|---|---|---|
+| `generate_schema_name` | Uses the schema as is in production (`MARTS`) and prefixes it everywhere else (`DBT_<you>_MARTS`) | Every model, seed and snapshot. dbt calls it on its own because it replaces dbt's default macro with the same name |
+| `nhl_tie_group_id` | Gives the same id to the teams tied on criteria 1 to 5 on the same day | `int_league_ranking_pre_tie_breaker` (`tie_group_id`) |
+| `nhl_matchups_ids` | Gives an id to a pair of teams, whichever one is at home | `int_tied_teams_rate` (`matchup_id`), to group the games between two tied teams |
 
 ## How the cumulative models work
 
@@ -140,33 +140,61 @@ The marts downstream only pick up the days that were recomputed, using `_batch_l
 
 dbt Cloud sets `DBT_CLOUD_INVOCATION_CONTEXT = prod` in production, and `generate_schema_name` relies on it. A development run can't write to the production tables.
 
-## Running
-
-```
-dbt build                              # models, seeds, snapshots and tests, in order
-dbt build -s fct_league_rankings+      # one model and everything after it
-dbt test                               # tests only
-dbt test -s test_type:singular         # only the business rule tests in tests/
-```
-
-A new development schema starts empty, so the first `dbt build` in it rebuilds everything from raw.
-
 ## Tests
 
-The generic tests are in the `_*__models.yml` files. They check the grain of every model, the keys, the accepted values (`last_period_type`, `goal_type`, points), value ranges (ranks, coordinates, distances) and the relationships to `dim_teams` and `nhl_teams`.
+### Generic tests
 
-The singular tests are in `tests/`. Each one returns the rows that break a rule:
+They are declared in the `_*__models.yml` files, next to the descriptions.
 
-| Test | What it catches |
-|---|---|
-| `assert_standings_match_recomputation` | Team running totals that drifted (a day counted twice or skipped) |
-| `assert_player_totals_match_recomputation` | The same for player goals and assists |
-| `assert_every_game_date_has_standings` | A loaded day that was never processed |
-| `assert_every_ranking_date_is_complete` | A day without all 32 teams, or ranks that don't start at 1 |
-| `assert_pbp_goals_match_final_score` | Play by play missing, or loaded before the game ended |
-| `assert_team_totals_never_decrease` and `assert_player_totals_never_decrease` | A day replaced with older data |
-| `assert_team_record_is_consistent` | Impossible records, like more wins than games |
-| `assert_league_totals_balance` | A game counted for only one of its two teams |
+| Model | Columns | Test |
+|---|---|---|
+| `stg_nhl_api__games` | `game_id` | unique, not null |
+| | `season`, `game_date` | not null |
+| | `home_team_id`, `away_team_id` | not null, exists in the `nhl_teams` seed |
+| | `last_period_type` | one of `REG`, `OT`, `SO` |
+| `stg_nhl_api__goals` | `game_id` + `event_id` | unique together |
+| | `game_id`, `event_id`, `scoring_player_id` | not null |
+| `stg_nhl_api__players` | `player_id` | unique, not null |
+| `int_team_game_results` | `game_id` + `team_id` | unique together |
+| | `points` | one of 0, 1, 2 |
+| `int_league_ranking_pre_tie_breaker` | `season` + `ranking_date` + `team_id` | unique together |
+| `int_tied_teams_rate` | `season` + `ranking_date` + `tie_group_id` + `team_id` | unique together |
+| | `tie_rate` | not null, between 0 and 1 |
+| `int_player_scoring_cumulative` | `season` + `ranking_date` + `player_id` | unique together |
+| | `number_of_points` | at least 1 |
+| `fct_league_rankings` | `season` + `ranking_date` + `team_id` | unique together |
+| | `ranking` | not null, between 1 and 32 |
+| | `team_id` | not null, exists in `dim_teams` |
+| `fct_player_goals_rankings`, `fct_player_assists_rankings`, `fct_player_points_rankings` | `season` + `ranking_date` + `player_id` | unique together |
+| | `ranking` | not null |
+| `fct_games` | `game_id` | unique, not null |
+| `fct_goals` | `game_id` + `event_id` | unique together |
+| | `goal_type` | not null, one of `EN`, `PPG`, `SHG`, `EV` |
+| `fct_team_travel` | `game_id` + `team_id` | unique together |
+| | `team_id` | not null, exists in `dim_teams` |
+| | `arena_name` | not null |
+| | `distance_km` | 0 or more |
+| `dim_players` | `player_id` | unique, not null |
+| `dim_teams` | `team_id` | unique, not null |
+| | `arena_name` | not null |
+| | `arena_latitude` | not null, between -90 and 90 |
+| | `arena_longitude` | not null, between -180 and 180 |
+
+### Singular tests
+
+They are in `tests/`. Each one returns the rows that break its rule, so a passing test returns nothing.
+
+| Test | Model checked | Rule |
+|---|---|---|
+| `assert_standings_match_recomputation` | `fct_league_rankings` | On the latest day of each season, every team's `games_played`, `points`, `total_wins`, `regulation_wins`, `regulation_ot_wins`, `goals_for` and `goals_against` equal the same totals recomputed from scratch from `int_team_game_results`. Catches a day counted twice or skipped by the incremental runs |
+| `assert_player_totals_match_recomputation` | `int_player_scoring_cumulative` | On the latest day of each season, every player's `number_of_goals` and `number_of_assists` equal a count from scratch over `stg_nhl_api__goals` (scorer, first assist, second assist) |
+| `assert_team_totals_never_decrease` | `fct_league_rankings` | Within a season, none of `games_played`, `points`, `total_wins`, `regulation_wins`, `regulation_ot_wins`, `goals_for`, `goals_against` is lower than on the team's previous day. Catches a day replaced with older data |
+| `assert_player_totals_never_decrease` | `int_player_scoring_cumulative` | Within a season, `number_of_goals` and `number_of_assists` are never lower than on the player's previous day |
+| `assert_every_game_date_has_standings` | `fct_league_rankings` | Every `game_date` of `stg_nhl_api__games` has standings for that season and date. Catches a day loaded into raw but never processed |
+| `assert_every_ranking_date_is_complete` | `fct_league_rankings` | Every day has as many teams as the `nhl_teams` seed (32), and the best `ranking` is 1 once at least one game has been played (on day 0 every team is ranked last) |
+| `assert_team_record_is_consistent` | `fct_league_rankings` | For every team and day: `total_wins` ≤ `games_played`, `regulation_wins` ≤ `regulation_ot_wins` ≤ `total_wins`, `points` ≥ 2 × `total_wins`, `points` − 2 × `total_wins` ≤ losses (each loss is worth at most 1 point), and `goal_diff` = `goals_for` − `goals_against` |
+| `assert_league_totals_balance` | `fct_league_rankings` | For the whole league on every day: 2 × the sum of `total_wins` = the sum of `games_played` (one winner per game, two teams per game), and the sum of `goals_for` = the sum of `goals_against`. Catches a game counted for only one of its two teams |
+| `assert_pbp_goals_match_final_score` | `stg_nhl_api__goals` | For every finished game, the number of goals in the play by play equals `home_team_score` + `away_team_score`, minus 1 for a game decided in a shootout (the final score gives the shootout winner one goal, but shootout goals are not in the play by play). Catches a play by play loaded before the end of the game, or never loaded |
 
 To look at the failing rows, add `--store-failures` and query `DBT_<you>_DBT_TEST__AUDIT.<test name>`.
 

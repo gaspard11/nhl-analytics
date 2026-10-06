@@ -40,7 +40,7 @@ This project could almost entirely have been vibe coded. The DAG, the dbt models
 
 * **dbt.** I wrote the models, macros and tests myself. I then asked Claude Code to audit the project and recommend how to make it more professional and closer to dbt best practices. I let it do the clean up: renaming files and columns to follow naming conventions, adding comments, and filling the YAML files with descriptions of the models and columns.
 * **Airflow.** I wrote the DAG myself, with Claude on the side as a teacher and to help me debug. The only task Claude Code wrote entirely is `stop_vm`, which shuts down the VM Airflow runs on, a part I knew very little about.
-* **Streamlit.** I wrote all the charts myself, again with Claude as a teacher when the documentation was not enough. Claude Code wrote these parts entirely: the CSS that draws the goal type "pills" in `games.py`, the buttons that highlight teams in the standings evolution in `standings.py`, and the general styling, which I had not paid much attention to while building the charts. It also reorganised the code and added comments.
+* **Streamlit.** I wrote all the charts myself, again with Claude as a teacher when the documentation was not enough. Claude Code wrote these parts entirely: the CSS that draws the goal type "pills" in `games.py`, the buttons that highlight teams on the Evolution page in `evolution.py`, and the general styling, which I had not paid much attention to while building the charts. It also reorganised the code and added comments.
 * **GCP VM setup.** I relied on Claude heavily here, as I had very little knowledge of it, and mostly ran the commands it recommended.
 
 ## Architecture
@@ -119,12 +119,29 @@ Models, tests, the incremental logic and a runbook are documented in [`dbt/READM
 
 ## Streamlit app
 
-The app is in [`app/`](app). Run it with `streamlit run app.py` from that folder. It has four pages, switched from a navigation bar at the top:
+The app is in [`app/`](app). Run it with `streamlit run app.py` from that folder. It has four pages, switched from a navigation bar at the top. The charts are made with Altair and the tables with Streamlit's own dataframes. Every page has a season and a date picker, so you can go back to any day of a season and see things as they were that day.
 
-* **Games**: every game up to a chosen date, filterable by team. Each game opens on a timeline of the score with the goals placed on it, the points of each player, and the goal log with the situation of every goal (power play, short handed, empty net).
-* **Standings**: the standings table on any date, for the league, a conference or a division.
-* **Evolution**: points above .500 game after game for every team, with teams to highlight.
-* **Player stats**: player rankings by points, goals or assists.
+### Games
+
+This is the page I spent the most time on. It lists every game up to the chosen date, newest first, and can be filtered on one team. Each game is a card with the two logos, the score (the winner in bold) and how the game ended: `REG`, `OT` or `SO`. Opening a game shows three things:
+
+* **Timeline**: one bar for the whole game, cut by period, in the colour of the team leading at that moment (grey when the score is tied). Each goal is the logo of the team that scored it, above the bar for the home team and below for the away team. Hovering over a goal shows the scorer's headshot, the assists, the score after the goal and the type of goal. In overtime the bar stops at the winning goal, and a shootout shows as one last goal for the winner.
+* **Points**: one bar per player who scored or assisted, in the team's colour, goals in full colour and assists lighter, with the player's headshot at the end of the bar.
+* **Goal log**: every goal, period by period, with the scorer, the assists, the score, the time and the situation: power play, short handed, empty net, extra attacker or even strength, with the number of skaters on each side (`5 on 4`).
+
+### Standings
+
+The standings table on any date, for the whole league, a conference or a division, with the same columns as on nhl.com: games played, points, wins, regulation wins, regulation and overtime wins, goals for, goals against and goal differential. The order comes straight from dbt, with every tie breaker applied, and the rank starts again at 1 inside a conference or a division.
+
+### Evolution
+
+Each team's points above .500, game after game: points minus games played, so a team that takes one point per game on average stays at 0. It is a good way to compare teams that haven't played the same number of games. There is one line per team, in its colours, with its logo at the end. On the right, a button per team (logo and abbreviation, grouped by division) highlights its line and fades the others, which is handy when 32 lines are on top of each other. Moving the date back replays the season up to that day, and the axes don't move, so two dates are easy to compare.
+
+### Player stats
+
+Players ranked by points, goals or assists on the chosen date, with their headshot and their team's logo, for the whole league, a conference or a division. The column the table is ranked by is highlighted. The team shown is the player's current team.
+
+### Cache
 
 The data only changes once a day, so query results are cached until 12:00 UTC, after the morning load. Snowflake is then queried once for the day rather than on every visit.
 
@@ -152,6 +169,7 @@ Secrets are kept out of the repo: `.env`, the Snowflake private keys, `config/ai
 
 There is so much to do in terms of visualisation that this could go on forever. Some ideas for what comes next:
 
+* Team travel. The dbt model is already there (`fct_team_travel`): for every game, the arena a team comes from, the arena it plays in and the distance between the two. I've started a map of each team's trips over the season, and the next step is to compare teams: who travels the most, where, and whether the teams that travel more get worse results.
 * More advanced player stats.
 * Loading the full play by play instead of only the goals.
 * Visualisations built from the puck coordinates given for each event, such as shot maps.
