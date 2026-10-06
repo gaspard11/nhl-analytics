@@ -1,5 +1,7 @@
 """Code shared by the pages of the app: team colours, helpers, data and the season / date controls."""
 
+from datetime import datetime, timedelta, timezone
+
 import pandas as pd
 import streamlit as st
 from cryptography.hazmat.primitives import serialization
@@ -76,13 +78,38 @@ def get_connection():
     return st.connection("snowflake")
 
 
+# The Airflow pipeline loads new data once a day (10:15 UTC): the app keeps its query results
+# until REFRESH_HOUR_UTC, then queries Snowflake again, once, for everyone
+REFRESH_HOUR_UTC = 12
+
+
+def data_version():
+    """The date of the data currently in Snowflake: changes once a day, at REFRESH_HOUR_UTC.
+    Before that hour it's still yesterday's date, as the new data may not be loaded yet."""
+    return (datetime.now(timezone.utc) - timedelta(hours=REFRESH_HOUR_UTC)).date()
+
+
+@st.cache_data(max_entries=10, show_spinner="Loading data...")
+def _cached_query(sql, version):
+    """Runs the query and keeps the result. st.cache_data keys the cache on the arguments:
+    same sql and same version -> the stored result is returned, Snowflake isn't queried.
+    `version` isn't used in the body, it's only there so a new day means a new cache entry.
+    (The cursor is used instead of conn.query, as conn.query has its own cache with a ttl.)"""
+    return get_connection().cursor().execute(sql).fetch_pandas_all()
+
+
+def run_query(sql):
+    """Query result, cached until the next refresh (see data_version)."""
+    return _cached_query(sql, data_version())
+
+
 # ---------------------------------------------------------------------------
 # Data
 # ---------------------------------------------------------------------------
 
 # Ranking history of every team, used by the Standings and Evolution pages (cached 10 min)
 def load_rankings():
-    return get_connection().query(
+    return run_query(
         """
         select
             rankings.ranking_date,
@@ -104,8 +131,7 @@ def load_rankings():
         from fct_league_rankings as rankings
         inner join dim_teams as teams
             on rankings.team_id = teams.team_id
-        """,
-        ttl=600,
+        """
     )
 
 
