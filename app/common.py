@@ -1,4 +1,5 @@
-"""Code shared by the pages of the app: team colours, helpers, data and the season / date controls."""
+"""Code shared by the pages: team colours, Snowflake access with a daily cache, and the controls
+that appear on several pages (season, date, league / conference / division)."""
 
 from datetime import datetime, timedelta, timezone
 
@@ -7,7 +8,7 @@ import streamlit as st
 from cryptography.hazmat.primitives import serialization
 
 
-# Main colour of each team's logo, used by the evolution lines, the game timeline and the scorers chart
+# Main colour of each team's logo: evolution lines, game timeline, points chart
 TEAM_COLORS = {
     "Anaheim Ducks": "#F47A38",
     "Boston Bruins": "#FFB81C",
@@ -44,14 +45,15 @@ TEAM_COLORS = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def display_season(season):
+    """20252026 -> "2025 - 2026"."""
+    season = str(season)
+    return f"{season[:4]} - {season[4:]}"
 
-# Formatting seasons: 20252026 -> "2025 - 2026"
-def display_season(season_int):
-    season_str = str(season_int)
-    return str(season_str[:4]) + " - " + str(season_str[4:])
+
+# ---------------------------------------------------------------------------
+# Snowflake
+# ---------------------------------------------------------------------------
 
 
 @st.cache_resource
@@ -72,14 +74,15 @@ def _private_key_der():
 
 
 def get_connection():
-    # Locally, secrets.toml points to the key file (private_key_file); on Streamlit Cloud the key content is in the secrets
+    # Locally, secrets.toml points to the key file (private_key_file). On Streamlit Cloud there is
+    # no file, so the key itself is stored in the secrets (private_key_pem)
     if "private_key_pem" in st.secrets["connections"]["snowflake"]:
         return st.connection("snowflake", private_key=_private_key_der())
     return st.connection("snowflake")
 
 
-# The Airflow pipeline loads new data once a day (10:15 UTC): the app keeps its query results
-# until REFRESH_HOUR_UTC, then queries Snowflake again, once, for everyone
+# Airflow loads new data once a day at 10:15 UTC. Query results are kept until REFRESH_HOUR_UTC,
+# then Snowflake is queried again, once for every visitor
 REFRESH_HOUR_UTC = 12
 
 
@@ -91,10 +94,8 @@ def data_version():
 
 @st.cache_data(max_entries=10, show_spinner="Loading data...")
 def _cached_query(sql, version):
-    """Runs the query and keeps the result. st.cache_data keys the cache on the arguments:
-    same sql and same version -> the stored result is returned, Snowflake isn't queried.
-    `version` isn't used in the body, it's only there so a new day means a new cache entry.
-    (The cursor is used instead of conn.query, as conn.query has its own cache with a ttl.)"""
+    """The cache is keyed on the arguments: `version` is unused in the body, it only makes a new
+    day a new cache entry. A cursor is used rather than conn.query, which has its own ttl cache."""
     return get_connection().cursor().execute(sql).fetch_pandas_all()
 
 
@@ -104,11 +105,11 @@ def run_query(sql):
 
 
 # ---------------------------------------------------------------------------
-# Data
+# Data shared by several pages
 # ---------------------------------------------------------------------------
 
-# Ranking history of every team, used by the Standings and Evolution pages (cached 10 min)
 def load_rankings():
+    """Daily standings of every team, for the Standings and Evolution pages."""
     return run_query(
         """
         select
@@ -136,8 +137,8 @@ def load_rankings():
 
 
 # ---------------------------------------------------------------------------
-# Controls, the same on every page: they're drawn in the container they're given,
-# so each page places them in its own row of columns
+# Controls. Each one is drawn in the container it is given, so every page can lay them out
+# in its own row of columns
 # ---------------------------------------------------------------------------
 
 def season_picker(container, seasons):
@@ -155,8 +156,8 @@ def view_picker(container):
 
 
 def group_picker(container, rankings, view):
-    """For the Conference and Division views: which conference or division to show.
-    Returns (group column, selected group), or (None, None) for the League view (nothing drawn)."""
+    """Which conference or division to show, for those views.
+    Returns (group column, selected group), or (None, None) in the League view, where nothing is drawn."""
     if view == "League":
         return None, None
     group_column = view.upper()  # "CONFERENCE" or "DIVISION"
@@ -165,15 +166,15 @@ def group_picker(container, rankings, view):
         view,
         groups,
         default=groups[0],
-        key=f"group_{view}",  # one widget per view, as the options differ
+        key=f"group_{view}",  # one widget per view, since the options differ
     ) or groups[0]
     return group_column, group
 
 
 def date_picker(container, available_dates, key):
-    """Date input limited to the season's dates. Returns the selected date among available_dates:
-    a day without data (no game played that day) falls back to the last date before it.
-    The key should include the season, so changing season resets the date to its last day."""
+    """Date input limited to the season. Returns a date from available_dates: a day without data
+    (no game that day) falls back to the last date before it.
+    Include the season in the key, so that changing season resets the date to the season's end."""
     season_dates = pd.to_datetime(pd.Series(available_dates))
     picked_date = container.date_input(
         "Date",
