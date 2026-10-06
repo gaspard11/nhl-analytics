@@ -1,3 +1,6 @@
+-- One row per team per game: the arena of the game and the arena of the team's previous game,
+-- with the distance between the two. Feeds the travel map of the app.
+
 with team_games as (
 
     select

@@ -150,7 +150,9 @@ models:
         description: "{{ doc('fetched_at') }}"
 
   - name: fct_goals
-    description: One row per goal of a finished game, shootout goals excluded.
+    description: >
+      One row per goal of a finished game, shootout goals excluded, with the situation of the goal
+      (power play, short handed, empty net, even strength).
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -182,6 +184,70 @@ models:
         description: Time left in the period when the goal was scored, as `MM:SS`.
       - name: fetched_at
         description: "{{ doc('fetched_at') }}"
+      - name: goal_type
+        description: >
+          Situation of the goal from the scoring team's point of view, worked out from situation_code.
+          EN = empty net (the other team's goalie was pulled), PPG = power play goal,
+          SHG = short handed goal, EV = even strength. A team that pulled its own goalie for an
+          extra attacker is not counted as being on a power play.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['EN', 'PPG', 'SHG', 'EV']
+      - name: strength
+        description: >
+          Skaters on the ice when the goal was scored, scoring team first, e.g. `5 on 4`.
+          Goalies are not counted, so a team with its goalie pulled shows 6 skaters.
+
+  - name: fct_team_travel
+    description: >
+      One row per team per game, with the arena the team played in and the arena of its previous game
+      of the season, to follow each team's trips across the season. Rebuilt in full on every run.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['game_id', 'team_id']
+    columns:
+      - name: game_id
+        description: "{{ doc('game_id') }}"
+      - name: season
+        description: "{{ doc('season') }}"
+      - name: game_date
+        description: "{{ doc('game_date') }}"
+      - name: team_id
+        description: "{{ doc('team_id') }}"
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_teams')
+                field: team_id
+      - name: is_home
+        description: True when the team played this game at home.
+      - name: previous_arena_name
+        description: Arena of the team's previous game this season. Null for its first game of the season.
+      - name: previous_arena_latitude
+        description: Latitude of the previous arena. Null for the team's first game of the season.
+      - name: previous_arena_longitude
+        description: Longitude of the previous arena. Null for the team's first game of the season.
+      - name: arena_name
+        description: Arena where this game was played, i.e. the home team's arena.
+        data_tests:
+          - not_null
+      - name: arena_latitude
+        description: Latitude of the arena where this game was played.
+      - name: arena_longitude
+        description: Longitude of the arena where this game was played.
+      - name: distance_km
+        description: >
+          Straight line distance in km between the previous arena and this one (Snowflake's `haversine`).
+          It is the distance as the crow flies, not the real route. 0 when the team stayed in the same arena,
+          null for the team's first game of the season.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
 
   - name: dim_players
     description: One row per player who has recorded a point, with the team of their most recent game with a point.

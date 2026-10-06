@@ -6,7 +6,42 @@ A daily data pipeline for the NHL regular season. Every morning it fetches the p
 
 This is a learning project. I wanted hands on practice with Airflow, dbt, Snowflake and Streamlit, and I needed a subject with real data that changes every day. The NHL was a good fit: the data is public, it updates daily during the season, and the standings rules are complex enough to be interesting to model.
 
-I know the setup is overkill. The standings and player stats are already available on nhl.com, and a single Python script on a cron could produce most of this. The point was not the output but building the full chain the way it is done in a company: orchestration, a warehouse with raw and modelled layers, tested transformations, and a front end reading from the warehouse.
+It is also a stat heavy sport, so there are plenty of fun things to build in terms of data visualisation.
+
+I know the setup is overkill. The standings and player stats are already available on nhl.com, a single Python script on a cron could produce most of this, and the app could probably even call the NHL API directly without storing anything. The point was not the output but building the full chain the way it is done in a company: orchestration, a warehouse with raw and modelled layers, tested transformations, and a front end reading from the warehouse.
+
+## Tool choices and cost
+
+I tried to keep the project as cheap as possible while still learning tools that are used in companies.
+
+| Tool | Role | Cost |
+|---|---|---|
+| Airflow | Orchestration | Free (open source), but it needs a machine to run on |
+| GCP VM | Runs Airflow every morning | Low: the VM is only up about an hour a day |
+| dbt Cloud | Transformations | Free plan |
+| Snowflake | Data warehouse | About $5 to $15 a month during the season |
+| Streamlit Community Cloud | Hosts the app | Free |
+
+**Airflow on GCP.** I could not leave my laptop on every morning, so Airflow runs on a GCP VM, which I set up with the help of Claude (see [Disclaimer on AI usage](#disclaimer-on-ai-usage)). A VM is not free, but Claude helped me find a way to keep it very cheap (see [Running Airflow on GCP for almost nothing](#running-airflow-on-gcp-for-almost-nothing)).
+
+**Snowflake.** The warehouse is the hardest part to make cheap. As said above, a warehouse is not needed for a project this size, but learning one was the point, so I chose Snowflake on the Standard edition, at $2 per credit. What keeps the bill down:
+
+* **One X-Small warehouse.** The smallest size, billed 1 credit per hour of running time.
+* **Auto-suspend after 60 seconds.** The warehouse only runs while queries run. Each restart is billed for at least 60 seconds.
+* **A short daily load.** The Airflow load and the dbt run keep the warehouse up for a few minutes, about 0.05 to 0.15 credits a day ($0.10 to $0.30).
+* **App cache.** The app caches query results until the next morning's load, so visits mostly hit the cache instead of waking the warehouse.
+* **Tiny data.** Everything fits in a few dozen MB, so storage costs almost nothing.
+
+Most of the bill comes from development rather than from the pipeline: a day of working on the app, or a large backfill, can cost as much as several weeks of daily runs. In the off season, the DAG finds no games and skips dbt, so the cost drops to almost zero.
+
+## Disclaimer on AI usage
+
+This project could almost entirely have been vibe coded. The DAG, the dbt models and the Streamlit app are plain code, and an AI assistant could have written nearly all of it, save perhaps the GCP setup and the connections between the tools. That is probably how many people would do it at work to save time, but my goal was to learn. I did use Claude Code, in a way that kept me learning:
+
+* **dbt.** I wrote the models, macros and tests myself. I then asked Claude Code to audit the project and recommend how to make it more professional and closer to dbt best practices. I let it do the clean up: renaming files and columns to follow naming conventions, adding comments, and filling the YAML files with descriptions of the models and columns.
+* **Airflow.** I wrote the DAG myself, with Claude on the side as a teacher and to help me debug. The only task Claude Code wrote entirely is `stop_vm`, which shuts down the VM Airflow runs on, a part I knew very little about.
+* **Streamlit.** I wrote all the charts myself, again with Claude as a teacher when the documentation was not enough. Claude Code wrote these parts entirely: the CSS that draws the goal type "pills" in `games.py`, the buttons that highlight teams on the Evolution page in `evolution.py`, and the general styling, which I had not paid much attention to while building the charts. It also reorganised the code and added comments.
+* **GCP VM setup.** I relied on Claude heavily here, as I had very little knowledge of it, and mostly ran the commands it recommended.
 
 ## Architecture
 
@@ -44,22 +79,22 @@ The DAG lives in [`dags/nhl_pipeline.py`](dags/nhl_pipeline.py). For one game da
 5. Triggers the dbt Cloud production job and waits for it to finish. On a day without games, dbt is skipped.
 6. Stops the VM it runs on.
 
-Scheduled runs use `game_date = yesterday`. Any date can be loaded or reloaded by triggering the DAG by hand with `game_date = YYYY-MM-DD`. Reloading a date is safe, because staging keeps only the latest load of each game.
+The DAG takes the date to load as a parameter. Scheduled runs load the day before, but any past date can be loaded again, which is how I backfilled earlier games. Loading the same date twice does no harm, because staging only keeps the latest load of each game.
 
 Snowflake and dbt Cloud are reached through two Airflow connections (`snowflake_conn_25` and `dbt_conn_gas25`), created on the VM and not stored in the repo.
 
 ## Running Airflow on GCP for almost nothing
 
-Airflow needs a machine that is up when the DAG runs. Keeping a VM running all day for a job that takes less than half an hour would cost far more than the job is worth, so the VM is only up for about an hour a day:
+Airflow needs a machine that is on when the DAG runs. The job takes less than half an hour, so paying for a machine that runs all day would be a waste. Instead, the VM is only on for about an hour each morning:
 
-* **Spot e2-medium.** Spot VMs cost a fraction of the normal price. Google can reclaim them, which is acceptable for a job that can simply run again.
-* **Instance schedule.** A GCP instance schedule starts the VM at 10:00 UTC, before the DAG, and stops it at 11:00 UTC as a safety net.
-* **The DAG turns its own machine off.** The last task, `stop_vm`, asks the GCE metadata server for the VM's name, zone and an access token, then calls the Compute Engine API to stop the instance. It runs even when an upstream task failed, so a broken run never leaves the VM billing all day. Manual runs skip it, so the VM stays up while I work in the Airflow UI.
-* **Least privilege.** The VM's service account has a custom role, `vmSelfStop`, that holds a single permission: `compute.instances.stop`. It can turn the VM off and nothing else.
+* **A cheap, interruptible machine.** The VM is a "spot" VM: Google sells its spare capacity at a large discount, with the catch that it can take the machine back at any time. For a daily job that can simply run again, that is a good deal.
+* **It starts on a timer.** GCP starts the VM at 10:00 UTC, just before the DAG, and stops it at 11:00 UTC in case anything went wrong.
+* **It turns itself off.** The last task of the DAG, `stop_vm`, shuts down the machine it runs on as soon as the work is done, even if an earlier task failed. That way a broken run never leaves the VM running (and billing) all day. When I start the DAG by hand, the VM stays on so I can keep working.
+* **It can only turn itself off.** The VM has permission to stop itself and nothing else, so even if someone got into it, they could not touch the rest of the GCP project.
 
-The VM runs a lighter Airflow stack than the local one ([`docker-compose.vm.yaml`](docker-compose.vm.yaml)): LocalExecutor instead of Celery, so no Redis or worker containers, and the Snowflake and dbt Cloud providers are built into the image ([`Dockerfile`](Dockerfile)) instead of being installed on every start. The local [`docker-compose.yaml`](docker-compose.yaml) is the standard CeleryExecutor setup, used for development.
+The VM also runs a lighter version of Airflow than the one I use on my laptop. The standard setup is built to share work across several machines, which is unnecessary for one small daily job, so the VM runs everything in a single place with fewer moving parts ([`docker-compose.vm.yaml`](docker-compose.vm.yaml)). The extra packages Airflow needs to talk to Snowflake and dbt Cloud are installed once, when the image is built ([`Dockerfile`](Dockerfile)), instead of every time the VM starts. This lets Airflow fit on a small, cheap machine and start faster each morning.
 
-The Airflow UI is not exposed to the internet. I reach it through an SSH tunnel from Cloud Shell.
+The Airflow web interface is not open to the internet. I reach it through a secure connection from Google Cloud Shell.
 
 ## Snowflake
 
@@ -80,16 +115,33 @@ The dbt project is in [`dbt/`](dbt) and runs in dbt Cloud. It goes from raw JSON
 
 The standings are cumulative and incremental: each run reads the state of the day before the new data and recomputes only the days that changed, instead of the whole season. Singular tests check that these running totals always match a full recomputation from raw.
 
-Models, tests, the incremental logic and a runbook are documented in [`dbt/README.md`](dbt/README.md).
+Models, tests and the incremental logic are documented in [`dbt/README.md`](dbt/README.md).
 
 ## Streamlit app
 
-The app is in [`app/`](app). Run it with `streamlit run app.py` from that folder. It has four pages, switched from a navigation bar at the top:
+The app is in [`app/`](app). It has four pages, switched from a navigation bar at the top. The charts are made with Altair and the tables with Streamlit's own dataframes. Every page has a season and a date picker, so you can go back to any day of a season and see things as they were that day.
 
-* **Games**: every game up to a chosen date, filterable by team. Each game opens on a timeline of the score with the goals placed on it, the points of each player, and the goal log with the situation of every goal (power play, short handed, empty net).
-* **Standings**: the standings table on any date, for the league, a conference or a division.
-* **Evolution**: points above .500 game after game for every team, with teams to highlight.
-* **Player stats**: player rankings by points, goals or assists.
+### Games
+
+This is the page I spent the most time on. It lists every game up to the chosen date, newest first, and can be filtered on one team. Each game is a card with the two logos, the score (the winner in bold) and how the game ended: `REG`, `OT` or `SO`. Opening a game shows three things:
+
+* **Timeline**: one bar for the whole game, cut by period, in the colour of the team leading at that moment (grey when the score is tied). Each goal is the logo of the team that scored it, above the bar for the home team and below for the away team. Hovering over a goal shows the scorer's headshot, the assists, the score after the goal and the type of goal. In overtime the bar stops at the winning goal, and a shootout shows as one last goal for the winner.
+* **Points**: one bar per player who scored or assisted, in the team's colour, goals in full colour and assists lighter, with the player's headshot at the end of the bar.
+* **Goal log**: every goal, period by period, with the scorer, the assists, the score, the time and the situation: power play, short handed, empty net, extra attacker or even strength, with the number of skaters on each side (`5 on 4`).
+
+### Standings
+
+The standings table on any date, for the whole league, a conference or a division, with the same columns as on nhl.com: games played, points, wins, regulation wins, regulation and overtime wins, goals for, goals against and goal differential. The order comes straight from dbt, with every tie breaker applied, and the rank starts again at 1 inside a conference or a division.
+
+### Evolution
+
+Each team's points above .500, game after game: points minus games played, so a team that takes one point per game on average stays at 0. It is a good way to compare teams that haven't played the same number of games. The idea comes from the standings chart on [MoneyPuck](https://moneypuck.com/standings.htm), which I liked a lot. There is one line per team, in its colours, with its logo at the end. On the right, a button per team (logo and abbreviation, grouped by division) highlights its line and fades the others, which is handy when 32 lines are on top of each other. Moving the date back replays the season up to that day, and the axes don't move, so two dates are easy to compare.
+
+### Player stats
+
+Players ranked by points, goals or assists on the chosen date, with their headshot and their team's logo, for the whole league, a conference or a division. The column the table is ranked by is highlighted. The team shown is the player's current team.
+
+### Cache
 
 The data only changes once a day, so query results are cached until 12:00 UTC, after the morning load. Snowflake is then queried once for the day rather than on every visit.
 
@@ -112,3 +164,13 @@ Secrets are kept out of the repo: `.env`, the Snowflake private keys, `config/ai
 * Teams come from a seed of the current 32 franchises, so older seasons with other teams would need a per season team list.
 * `stop_vm` is the last task of the DAG and runs whatever happens before it, so a failed run still ends green in the Airflow grid. The colour of each task has to be checked to see a failure.
 * No alerting yet: a failed run is only noticed by looking at Airflow or at the app.
+
+## Work in progress
+
+There is so much to do in terms of visualisation that this could go on forever. Some ideas for what comes next:
+
+* Team travel. The dbt model is already there (`fct_team_travel`): for every game, the arena a team comes from, the arena it plays in and the distance between the two. I've started a map of each team's trips over the season, and the next step is to compare teams: who travels the most, where, and whether the teams that travel more get worse results.
+* More advanced player stats.
+* Loading the full play by play instead of only the goals.
+* Visualisations built from the puck coordinates given for each event, such as shot maps.
+* Machine learning to predict results, as [MoneyPuck](https://moneypuck.com) does.
