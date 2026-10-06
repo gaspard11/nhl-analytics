@@ -1,41 +1,41 @@
-"""Standings page: the standings table at the selected date, for the league, a conference or a division."""
+"""Standings page: the standings table on a chosen date, for the league, a conference or a division."""
 
 import streamlit as st
 
 from common import date_picker, group_picker, load_rankings, season_picker, view_picker
 
 
-# Columns of the standings table
 COLUMNS = {
-        "RANK": st.column_config.NumberColumn("Rank", width="small"),
-        "LOGO_URL": st.column_config.ImageColumn("", width="small"),
-        "TEAM": st.column_config.TextColumn("Team"),
-        "GAMES_PLAYED": st.column_config.NumberColumn("GP", help="Games played"),
-        "POINTS": st.column_config.NumberColumn("PTS", help="Points: win = 2, OT/shootout loss = 1"),
-        "TOTAL_WINS": st.column_config.NumberColumn("W", help="Wins, including shootout wins"),
-        "REGULATION_WINS": st.column_config.NumberColumn("RW", help="Regulation wins"),
-        "REGULATION_OT_WINS": st.column_config.NumberColumn("ROW", help="Regulation + overtime wins"),
-        "GOALS_FOR": st.column_config.NumberColumn("GF", help="Goals for"),
-        "GOALS_AGAINST": st.column_config.NumberColumn("GA", help="Goals against"),
-        "GOAL_DIFF": st.column_config.NumberColumn("DIFF", help="Goal differential", format="%+d")
-    }
+    "RANK": st.column_config.NumberColumn("Rank", width="small"),
+    "LOGO_URL": st.column_config.ImageColumn("", width="small"),
+    "TEAM": st.column_config.TextColumn("Team"),
+    "GAMES_PLAYED": st.column_config.NumberColumn("GP", help="Games played"),
+    "POINTS": st.column_config.NumberColumn("PTS", help="Points: win = 2, OT/shootout loss = 1"),
+    "TOTAL_WINS": st.column_config.NumberColumn("W", help="Wins, including shootout wins"),
+    "REGULATION_WINS": st.column_config.NumberColumn("RW", help="Regulation wins"),
+    "REGULATION_OT_WINS": st.column_config.NumberColumn("ROW", help="Regulation + overtime wins"),
+    "GOALS_FOR": st.column_config.NumberColumn("GF", help="Goals for"),
+    "GOALS_AGAINST": st.column_config.NumberColumn("GA", help="Goals against"),
+    "GOAL_DIFF": st.column_config.NumberColumn("DIFF", help="Goal differential", format="%+d"),
+}
 
 
-# Standing table given a list of team and their standing stats at one date
 def standings_table(teams):
-        """One standings table; the rank is recomputed inside the group (league order, ties share a rank)."""
-        table = teams.sort_values("RANKING").assign(RANK=lambda d: d["RANKING"].rank(method="min").astype(int))
-        st.dataframe(
-            table[list(COLUMNS)],
-            column_config=COLUMNS,
-            hide_index=True,
-            width="stretch",
-            height=(len(table) + 1) * 35 + 3,
-        )
+    """RANKING is the league order (tie breakers included). The rank shown is recomputed within the
+    teams displayed, so a division starts at 1. Tied teams share a rank."""
+    table = teams.sort_values("RANKING").assign(RANK=lambda d: d["RANKING"].rank(method="min").astype(int))
+    st.dataframe(
+        table[list(COLUMNS)],
+        column_config=COLUMNS,
+        hide_index=True,
+        width="stretch",
+        # Header + one 35px row per team, so the whole table shows without scrolling
+        height=(len(table) + 1) * 35 + 3,
+    )
 
 
 # ---------------------------------------------------------------------------
-# Controls: season, date, standings view, and the conference / division for those views
+# Controls
 # ---------------------------------------------------------------------------
 
 rankings = load_rankings()

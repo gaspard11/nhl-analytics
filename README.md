@@ -6,7 +6,42 @@ A daily data pipeline for the NHL regular season. Every morning it fetches the p
 
 This is a learning project. I wanted hands on practice with Airflow, dbt, Snowflake and Streamlit, and I needed a subject with real data that changes every day. The NHL was a good fit: the data is public, it updates daily during the season, and the standings rules are complex enough to be interesting to model.
 
-I know the setup is overkill. The standings and player stats are already available on nhl.com, and a single Python script on a cron could produce most of this. The point was not the output but building the full chain the way it is done in a company: orchestration, a warehouse with raw and modelled layers, tested transformations, and a front end reading from the warehouse.
+It is also a stat heavy sport, so there are plenty of fun things to build in terms of data visualisation.
+
+I know the setup is overkill. The standings and player stats are already available on nhl.com, a single Python script on a cron could produce most of this, and the app could probably even call the NHL API directly without storing anything. The point was not the output but building the full chain the way it is done in a company: orchestration, a warehouse with raw and modelled layers, tested transformations, and a front end reading from the warehouse.
+
+## Tool choices and cost
+
+I tried to keep the project as cheap as possible while still learning tools that are used in companies.
+
+| Tool | Role | Cost |
+|---|---|---|
+| Airflow | Orchestration | Free (open source), but it needs a machine to run on |
+| GCP VM | Runs Airflow every morning | Low: the VM is only up about an hour a day |
+| dbt Cloud | Transformations | Free plan |
+| Snowflake | Data warehouse | About $5 to $15 a month during the season |
+| Streamlit Community Cloud | Hosts the app | Free |
+
+**Airflow on GCP.** I could not leave my laptop on every morning, so Airflow runs on a GCP VM, which I set up with the help of Claude (see [Disclaimer on AI usage](#disclaimer-on-ai-usage)). A VM is not free, but Claude helped me find a way to keep it very cheap (see [Running Airflow on GCP for almost nothing](#running-airflow-on-gcp-for-almost-nothing)).
+
+**Snowflake.** The warehouse is the hardest part to make cheap. As said above, a warehouse is not needed for a project this size, but learning one was the point, so I chose Snowflake on the Standard edition, at $2 per credit. What keeps the bill down:
+
+* **One X-Small warehouse.** The smallest size, billed 1 credit per hour of running time.
+* **Auto-suspend after 60 seconds.** The warehouse only runs while queries run. Each restart is billed for at least 60 seconds.
+* **A short daily load.** The Airflow load and the dbt run keep the warehouse up for a few minutes, about 0.05 to 0.15 credits a day ($0.10 to $0.30).
+* **App cache.** The app caches query results until the next morning's load, so visits mostly hit the cache instead of waking the warehouse.
+* **Tiny data.** Everything fits in a few dozen MB, so storage costs almost nothing.
+
+Most of the bill comes from development rather than from the pipeline: a day of working on the app, or a large backfill, can cost as much as several weeks of daily runs. In the off season, the DAG finds no games and skips dbt, so the cost drops to almost zero.
+
+## Disclaimer on AI usage
+
+This project could almost entirely have been vibe coded. The DAG, the dbt models and the Streamlit app are plain code, and an AI assistant could have written nearly all of it, except perhaps the GCP setup and the connections between the tools. That is probably how many people would do it at work to save time, but my goal was to learn. I did use Claude Code, in a way that kept me learning:
+
+* **dbt.** I wrote the models, macros and tests myself. I then asked Claude Code to audit the project and recommend how to make it more professional and closer to dbt best practices. I let it do the clean up: renaming files and columns to follow naming conventions, adding comments, and filling the YAML files with descriptions of the models and columns.
+* **Airflow.** I wrote the DAG myself, with Claude on the side as a teacher and to help me debug. The only task Claude Code wrote entirely is `stop_vm`, which shuts down the VM Airflow runs on, a part I knew very little about.
+* **Streamlit.** I wrote all the charts myself, again with Claude as a teacher when the documentation was not enough. Claude Code wrote these parts entirely: the CSS that draws the goal type "pills" in `games.py`, the buttons that highlight teams in the standings evolution in `standings.py`, and the general styling, which I had not paid much attention to while building the charts. It also reorganised the code and added comments.
+* **GCP VM setup.** I relied on Claude heavily here, as I had very little knowledge of it, and mostly ran the commands it recommended.
 
 ## Architecture
 
@@ -112,3 +147,12 @@ Secrets are kept out of the repo: `.env`, the Snowflake private keys, `config/ai
 * Teams come from a seed of the current 32 franchises, so older seasons with other teams would need a per season team list.
 * `stop_vm` is the last task of the DAG and runs whatever happens before it, so a failed run still ends green in the Airflow grid. The colour of each task has to be checked to see a failure.
 * No alerting yet: a failed run is only noticed by looking at Airflow or at the app.
+
+## Work in progress
+
+There is so much to do in terms of visualisation that this could go on forever. Some ideas for what comes next:
+
+* More advanced player stats.
+* Loading the full play by play instead of only the goals.
+* Visualisations built from the puck coordinates given for each event, such as shot maps.
+* Machine learning to predict results, as [MoneyPuck](https://moneypuck.com) does.
