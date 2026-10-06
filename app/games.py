@@ -4,9 +4,8 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 
-from common import TEAM_COLORS, date_picker, display_season, get_connection, season_picker
+from common import TEAM_COLORS, date_picker, display_season, run_query, season_picker
 
-conn = get_connection()
 period_names = {1: "1st", 2: "2nd", 3: "3rd", 4: "OT"}
 LOGO_WIDTH = 100
 
@@ -41,7 +40,7 @@ st.html("""<style>
 
 
 
-games = conn.query(
+games = run_query(
         """
         select
             games.game_id,          
@@ -79,8 +78,7 @@ games = conn.query(
         inner join nhl_analytics.marts.dim_players scorers on goals.scoring_player_id = scorers.player_id
         left join nhl_analytics.marts.dim_players assist1 on goals.assist1_player_id = assist1.player_id
         left join nhl_analytics.marts.dim_players assist2 on goals.assist2_player_id = assist2.player_id
-        """,
-        ttl=600,
+        """
     )
 
 

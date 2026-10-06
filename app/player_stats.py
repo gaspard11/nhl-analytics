@@ -1,11 +1,10 @@
 import streamlit as st
 
 st.set_page_config(page_title="NHL", layout="wide") 
-from common import date_picker, group_picker, load_rankings, season_picker, view_picker, get_connection
-conn = get_connection()
+from common import date_picker, group_picker, load_rankings, season_picker, view_picker, run_query
 
 
-players = conn.query(
+players = run_query(
     """select 
     points.ranking_date,
     points.season,
@@ -25,8 +24,7 @@ players = conn.query(
     inner join nhl_analytics.marts.fct_player_assists_rankings assists on assists.player_id = points.player_id and points.ranking_date = assists.ranking_date
     inner join nhl_analytics.marts.dim_players players on points.player_id = players.player_id
     inner join nhl_analytics.marts.dim_teams teams on players.team_id = teams.team_id
-    """,
-        ttl=600,
+    """
     )
 
 COLUMNS = {
