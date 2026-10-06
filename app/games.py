@@ -27,6 +27,8 @@ TIMELINE_HEIGHT = 2 * (LABELS_OFFSET + 8)
 st.html("""<style>
 [data-testid="stExpander"] details { border: none !important; border-top: 1px solid rgba(49, 51, 63, 0.1) !important; border-radius: 0 !important; }
 [data-testid="stExpander"] summary { padding-left: 0 !important; }
+/* No "fullscreen" button over the images (team logos, headshots) when hovering them */
+[data-testid="stElementContainer"]:has([data-testid="stImage"]) [data-testid="stElementToolbar"] { display: none; }
 /* Goal tooltips of the timeline: title (period and time), scorer headshot, then the details */
 #vg-tooltip-element h2 { font-size: 14px; margin: 0 0 6px; text-align: center; }
 #vg-tooltip-element img { display: block; width: 120px; height: 120px; margin: 0 auto 6px; border-radius: 50%; background: #f0f2f6; }
