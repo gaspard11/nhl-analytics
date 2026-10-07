@@ -6,7 +6,7 @@ A daily data pipeline for the NHL regular season. Every morning it fetches the p
 
 This is a learning project. I wanted hands on practice with Airflow, dbt, Snowflake and Streamlit, and I needed a subject with real data that changes every day. The NHL was a good fit: the data is public, it updates daily during the season, and the standings rules are complex enough to be interesting to model.
 
-It is also a stat heavy sport, so there are plenty of fun things to build in terms of data visualisation.
+Furthermore, I am a hockey fan and it is a stat heavy sport, so there are plenty of fun things to build in terms of data visualisation.
 
 I know the setup is overkill. The standings and player stats are already available on nhl.com, a single Python script on a cron could produce most of this, and the app could probably even call the NHL API directly without storing anything. The point was not the output but building the full chain the way it is done in a company: orchestration, a warehouse with raw and modelled layers, tested transformations, and a front end reading from the warehouse.
 
@@ -21,6 +21,7 @@ I tried to keep the project as cheap as possible while still learning tools that
 | dbt Cloud | Transformations | Free plan |
 | Snowflake | Data warehouse | About $5 to $15 a month during the season |
 | Streamlit Community Cloud | Hosts the app | Free |
+| Claude (Pro plan) | Teacher, debugging, code reviews (see [Disclaimer on AI usage](#disclaimer-on-ai-usage)) | $20 a month |
 
 **Airflow on GCP.** I could not leave my laptop on every morning, so Airflow runs on a GCP VM, which I set up with the help of Claude (see [Disclaimer on AI usage](#disclaimer-on-ai-usage)). A VM is not free, but Claude helped me find a way to keep it very cheap (see [Running Airflow on GCP for almost nothing](#running-airflow-on-gcp-for-almost-nothing)).
 
@@ -62,11 +63,11 @@ A normal day:
 
 | Time (UTC) | What happens |
 |---|---|
-| 10:00 | A GCP instance schedule starts the VM. Docker brings Airflow up. |
-| 10:15 | The `nhl_raw_pipeline` DAG runs for the previous day. |
+| 06:00 | A GCP instance schedule starts the VM. Docker brings Airflow up. |
+| 06:15 | The `nhl_raw_pipeline` DAG runs for the previous day. |
 | right after | The DAG loads the raw data, triggers the dbt Cloud job, waits for it, then shuts the VM down. The whole run takes less than half an hour. |
-| 11:00 | Backup: the instance schedule stops the VM if it is still running. |
-| 12:00 | The Streamlit app drops its cache and reads the new data. |
+| 07:00 | Backup: the instance schedule stops the VM if it is still running. |
+| 08:00 | The Streamlit app drops its cache and reads the new data. |
 
 ## Airflow
 
@@ -88,7 +89,7 @@ Snowflake and dbt Cloud are reached through two Airflow connections (`snowflake_
 Airflow needs a machine that is on when the DAG runs. The job takes less than half an hour, so paying for a machine that runs all day would be a waste. Instead, the VM is only on for about an hour each morning:
 
 * **A cheap, interruptible machine.** The VM is a "spot" VM: Google sells its spare capacity at a large discount, with the catch that it can take the machine back at any time. For a daily job that can simply run again, that is a good deal.
-* **It starts on a timer.** GCP starts the VM at 10:00 UTC, just before the DAG, and stops it at 11:00 UTC in case anything went wrong.
+* **It starts on a timer.** GCP starts the VM at 06:00 UTC, just before the DAG, and stops it at 07:00 UTC in case anything went wrong.
 * **It turns itself off.** The last task of the DAG, `stop_vm`, shuts down the machine it runs on as soon as the work is done, even if an earlier task failed. That way a broken run never leaves the VM running (and billing) all day. When I start the DAG by hand, the VM stays on so I can keep working.
 * **It can only turn itself off.** The VM has permission to stop itself and nothing else, so even if someone got into it, they could not touch the rest of the GCP project.
 
@@ -143,7 +144,7 @@ Players ranked by points, goals or assists on the chosen date, with their headsh
 
 ### Cache
 
-The data only changes once a day, so query results are cached until 12:00 UTC, after the morning load. Snowflake is then queried once for the day rather than on every visit.
+The data only changes once a day, so query results are cached until 08:00 UTC, after the morning load. Snowflake is then queried once for the day rather than on every visit.
 
 ## Repository layout
 

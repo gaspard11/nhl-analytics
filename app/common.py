@@ -81,9 +81,9 @@ def get_connection():
     return st.connection("snowflake")
 
 
-# Airflow loads new data once a day at 10:15 UTC. Query results are kept until REFRESH_HOUR_UTC,
+# Airflow loads new data once a day at 06:15 UTC. Query results are kept until REFRESH_HOUR_UTC,
 # then Snowflake is queried again, once for every visitor
-REFRESH_HOUR_UTC = 12
+REFRESH_HOUR_UTC = 8
 
 
 def data_version():
