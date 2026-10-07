@@ -72,8 +72,9 @@ The play by play gives a 4 digit `situation_code` for every goal: away goalie in
 
 `fct_goals` reads that code from the scoring team's side and adds two columns:
 
-* `strength`: skaters on each side, scoring team first, like `5 on 4`.
+* `strength`: skaters on each side, scoring team first, like `5 on 4`, or `Penalty shot`.
 * `goal_type`:
+  * `PS` (penalty shot) when the code is `0101` or `1010`: one shooter alone against the goalie,
   * `EN` (empty net) when the other team had pulled its goalie,
   * `PPG` (power play) when the scoring team had more skaters,
   * `SHG` (short handed) when it had fewer,
@@ -169,7 +170,7 @@ They are declared in the `_*__models.yml` files, next to the descriptions.
 | | `ranking` | not null |
 | `fct_games` | `game_id` | unique, not null |
 | `fct_goals` | `game_id` + `event_id` | unique together |
-| | `goal_type` | not null, one of `EN`, `PPG`, `SHG`, `EV` |
+| | `goal_type` | not null, one of `PS`, `EN`, `PPG`, `SHG`, `EV` |
 | `fct_team_travel` | `game_id` + `team_id` | unique together |
 | | `team_id` | not null, exists in `dim_teams` |
 | | `arena_name` | not null |
