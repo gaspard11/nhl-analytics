@@ -75,7 +75,7 @@ A normal day:
 
 ## Airflow
 
-The DAG lives in [`dags/nhl_pipeline.py`](dags/nhl_pipeline.py). For one game date it:
+The DAG lives in [`airflow/dags/nhl_pipeline.py`](airflow/dags/nhl_pipeline.py). For one game date it:
 
 1. Calls the NHL stats API for the finished regular season games of that day.
 2. Loads that payload into `NHL_RAW.RAW.GAMES_RAW`.
@@ -97,7 +97,7 @@ Airflow needs a machine that is on when the DAG runs. The job takes less than ha
 * **It turns itself off.** The last task of the DAG, `stop_vm`, shuts down the machine it runs on as soon as the work is done, even if an earlier task failed. That way a broken run never leaves the VM running (and billing) all day. When I start the DAG by hand, the VM stays on so I can keep working.
 * **It can only turn itself off.** The VM has permission to stop itself and nothing else, so even if someone got into it, they could not touch the rest of the GCP project.
 
-The VM also runs a lighter version of Airflow than the one I use on my laptop. The standard setup is built to share work across several machines, which is unnecessary for one small daily job, so the VM runs everything in a single place with fewer moving parts ([`docker-compose.vm.yaml`](docker-compose.vm.yaml)). The extra packages Airflow needs to talk to Snowflake and dbt Cloud are installed once, when the image is built ([`Dockerfile`](Dockerfile)), instead of every time the VM starts. This lets Airflow fit on a small, cheap machine and start faster each morning.
+The VM also runs a lighter version of Airflow than the one I use on my laptop. The standard setup is built to share work across several machines, which is unnecessary for one small daily job, so the VM runs everything in a single place with fewer moving parts ([`docker-compose.vm.yaml`](airflow/docker-compose.vm.yaml)). The extra packages Airflow needs to talk to Snowflake and dbt Cloud are installed once, when the image is built ([`Dockerfile`](airflow/Dockerfile)), instead of every time the VM starts. This lets Airflow fit on a small, cheap machine and start faster each morning.
 
 The Airflow web interface is not open to the internet. I reach it through a secure connection from Google Cloud Shell.
 
@@ -153,16 +153,17 @@ The data only changes once a day, so query results are cached until 08:00 UTC, a
 ## Repository layout
 
 ```
-dags/                    Airflow DAG
-dbt/                     dbt project (models, tests, seeds, snapshots, macros)
-app/                     Streamlit app
-.github/                 GitHub Actions workflow that keeps the app awake
-Dockerfile               Airflow image with the Snowflake and dbt Cloud providers
-docker-compose.yaml      local Airflow (CeleryExecutor)
-docker-compose.vm.yaml   Airflow on the GCP VM (LocalExecutor)
+airflow/                       Airflow
+  dags/                        the DAG
+  Dockerfile                   Airflow image with the Snowflake and dbt Cloud providers
+  docker-compose.yaml          local Airflow (CeleryExecutor)
+  docker-compose.vm.yaml       Airflow on the GCP VM (LocalExecutor)
+dbt/                           dbt project (models, tests, seeds, snapshots, macros)
+app/                           Streamlit app
+.github/                       GitHub Actions workflow that keeps the app awake
 ```
 
-Secrets are kept out of the repo: `.env`, the Snowflake private keys, `config/airflow.cfg` and the Streamlit `secrets.toml` are all ignored by git.
+Secrets are kept out of the repo: `.env`, the Snowflake private keys, `airflow/config/airflow.cfg` and the Streamlit `secrets.toml` are all ignored by git.
 
 ## Limitations
 
