@@ -187,18 +187,19 @@ models:
       - name: goal_type
         description: >
           Situation of the goal from the scoring team's point of view, worked out from situation_code.
-          EN = empty net (the other team's goalie was pulled), PPG = power play goal,
+          PS = penalty shot, EN = empty net (the other team's goalie was pulled), PPG = power play goal,
           SHG = short handed goal, EV = even strength. A team that pulled its own goalie for an
           extra attacker is not counted as being on a power play.
         data_tests:
           - not_null
           - accepted_values:
               arguments:
-                values: ['EN', 'PPG', 'SHG', 'EV']
+                values: ['PS', 'EN', 'PPG', 'SHG', 'EV']
       - name: strength
         description: >
           Skaters on the ice when the goal was scored, scoring team first, e.g. `5 on 4`.
           Goalies are not counted, so a team with its goalie pulled shows 6 skaters.
+          `Penalty shot` for a penalty shot goal (one shooter against the goalie).
 
   - name: fct_team_travel
     description: >
