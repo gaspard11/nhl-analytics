@@ -9,7 +9,7 @@ This is the transformation part of the project. It takes the raw NHL API data lo
 
 The raw data is loaded into `NHL_RAW.RAW` by the Airflow DAG `nhl_raw_pipeline` (see the [main README](../README.md)). Once the load is done, the DAG triggers the dbt Cloud production job, which builds the tables in `NHL_ANALYTICS.MARTS` that the Streamlit app reads. The project runs in dbt Cloud.
 
-### Standings rules
+### Standings rules (https://www.nhl.com/info/standings-info/tie-breaking-procedure)
 
 Each day, teams are ranked on:
 
