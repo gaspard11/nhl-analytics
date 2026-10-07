@@ -1,7 +1,7 @@
 {#
     Production jobs write to the custom schema as-is (e.g. MARTS).
     Everything else (IDE, CI, local dbt Core) writes to <target schema>_<custom schema>
-    (e.g. DBT_RGASPARD_MARTS), so it can never overwrite production tables.
+    (e.g. DBT_GROBERT_MARTS), so it can never overwrite production tables.
     DBT_CLOUD_INVOCATION_CONTEXT is set by dbt Cloud: prod, staging, ci or dev.
 #}
 {% macro generate_schema_name(custom_schema_name, node) -%}

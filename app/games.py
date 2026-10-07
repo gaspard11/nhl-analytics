@@ -56,7 +56,8 @@ goals = run_query(
         goals.team_id as scoring_team_id,
         goals.period_number,
         goals.time_in_period,
-        goals.situation_code
+        goals.goal_type as goal_type_code,
+        goals.strength
     from nhl_analytics.marts.fct_games as games
     inner join nhl_analytics.marts.dim_teams as home_teams
         on games.home_team_id = home_teams.team_id
@@ -75,28 +76,21 @@ goals = run_query(
 )
 
 
-def goal_situation(goal):
-    """Goal type from the scoring team's point of view, e.g. "⚡ Power play · 5 on 4".
-    SITUATION_CODE has 4 digits: away goalie (1/0), away skaters, home skaters, home goalie (1/0)."""
-    away_goalie, away_skaters, home_skaters, home_goalie = (int(digit) for digit in goal["SITUATION_CODE"])
-    if goal["SCORING_TEAM_ID"] == goal["HOME_TEAM_ID"]:
-        own_skaters, own_goalie, opp_skaters, opp_goalie = home_skaters, home_goalie, away_skaters, away_goalie
-    else:
-        own_skaters, own_goalie, opp_skaters, opp_goalie = away_skaters, away_goalie, home_skaters, home_goalie
+# goal_type of fct_goals, where the situation of each goal is worked out
+GOAL_TYPE_LABELS = {
+    "PS": "🎯 Penalty shot",
+    "EN": "🥅 Empty net",
+    "PPG": "⚡ Power play",
+    "SHG": "🛡️ Short-handed",
+    "EA": "➕ Extra attacker",
+    "EV": "🟰 Even strength",
+}
 
-    if own_skaters + opp_skaters == 1:  # one shooter against a goalie
-        return "🎯 Penalty shot"
-    if opp_goalie == 0:
-        goal_type = "🥅 Empty net"
-    elif own_goalie == 0:
-        goal_type = "➕ Extra attacker"
-    elif own_skaters > opp_skaters:
-        goal_type = "⚡ Power play"
-    elif own_skaters < opp_skaters:
-        goal_type = "🛡️ Short-handed"
-    else:
-        goal_type = "🟰 Even strength"
-    return f"{goal_type} · {own_skaters} on {opp_skaters}"
+
+def goal_situation(goals):
+    """Label shown for each goal, e.g. "⚡ Power play · 5 on 4". A penalty shot has no strength."""
+    labels = goals["GOAL_TYPE_CODE"].map(GOAL_TYPE_LABELS)
+    return labels.where(goals["GOAL_TYPE_CODE"] == "PS", labels + " · " + goals["STRENGTH"])
 
 
 def prepare_goals(goals):
@@ -113,7 +107,7 @@ def prepare_goals(goals):
         SCORING_TEAM=goals["HOME_TEAM"].where(is_home_goal, goals["AWAY_TEAM"]),
         SCORING_TEAM_LOGO=goals["HOME_TEAM_LOGO"].where(is_home_goal, goals["AWAY_TEAM_LOGO"]),
         LEADING_TEAM_COLOR=leading_team.map(TEAM_COLORS).fillna(TIED_COLOR),  # timeline colour after the goal
-        GOAL_TYPE=goals.apply(goal_situation, axis=1),
+        GOAL_TYPE=goal_situation(goals),
         GOAL_TIME=goals["PERIOD_NUMBER"].map(PERIOD_NAMES) + " period · " + goals["TIME_IN_PERIOD"],
         ASSISTS=goals[["ASSIST1", "ASSIST2"]].apply(lambda names: ", ".join(names.dropna()) or "Unassisted", axis=1),
         SCORE=goals["HOME_TEAM"] + " " + goals["HOME_SCORE"].astype(str)
