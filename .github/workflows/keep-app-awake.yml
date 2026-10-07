@@ -1,0 +1,34 @@
+# Visits the Streamlit app every 8 hours, so it never reaches the 12 hours without traffic after which
+# Community Cloud puts it to sleep. The 08:10 UTC run comes right after the app's daily cache refresh
+# (REFRESH_HOUR_UTC = 8 in app/common.py), so the day's queries are cached before the first visitor.
+#
+# Needs a repository variable APP_URL (Settings > Secrets and variables > Actions > Variables),
+# e.g. https://<your-app>.streamlit.app
+
+name: Keep app awake
+
+on:
+  schedule:
+    - cron: "10 0,8,16 * * *"  # UTC. GitHub can start scheduled runs a few minutes late
+  workflow_dispatch:  # "Run workflow" button, to test it by hand
+
+jobs:
+  visit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright and Chromium
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Visit every page of the app
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: python .github/scripts/keep_app_awake.py
