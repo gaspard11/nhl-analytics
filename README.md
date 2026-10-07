@@ -42,7 +42,7 @@ This project could almost entirely have been vibe coded. The DAG, the dbt models
 
 * **dbt.** I wrote the models, macros and tests myself. I then asked Claude Code to audit the project and recommend how to make it more professional and closer to dbt best practices. I let it do the clean up: renaming files and columns to follow naming conventions, adding comments, and filling the YAML files with descriptions of the models and columns.
 * **Airflow.** I wrote the DAG myself, with Claude on the side as a teacher and to help me debug. The only task Claude Code wrote entirely is `stop_vm`, which shuts down the VM Airflow runs on, a part I knew very little about.
-* **Streamlit.** I wrote all the charts myself, again with Claude as a teacher when the documentation was not enough. Claude Code wrote these parts entirely: the CSS that draws the goal type "pills" in `games.py`, the buttons that highlight teams on the Evolution page in `evolution.py`, and the general styling, which I had not paid much attention to while building the charts. It also reorganised the code and added comments.
+* **Streamlit.** I wrote all the charts myself, again with Claude as a teacher when the documentation was not enough. Claude Code wrote these parts entirely: the CSS that draws the goal type "pills" in `games.py`, the buttons that highlight teams on the Evolution page in `evolution.py`, the logos placed side by side when teams share a point on that chart, and the general styling, which I had not paid much attention to while building the charts. It also reorganised the code and added comments.
 * **GCP VM setup.** I relied on Claude heavily here, as I had very little knowledge of it, and mostly ran the commands it recommended.
 * **Keeping the app awake.** This part was written entirely by Claude Code: the GitHub Actions workflow and the Playwright script that visits the app to keep it awake.
 * **README files.** I wrote most of the text in the README files myself, but I let Claude Code write the lists describing the models, the lineage diagrams and the formatting.
@@ -78,9 +78,9 @@ A normal day:
 The DAG lives in [`airflow/dags/nhl_pipeline.py`](airflow/dags/nhl_pipeline.py). For one game date it:
 
 1. Calls the NHL stats API for the finished regular season games of that day.
-2. Loads that payload into `NHL_RAW.RAW.GAMES_RAW`.
-3. Fetches the play by play of every game (one mapped task per game) and loads it into `GAMES_PBP_RAW`.
-4. Collects every player who scored or assisted, skips the ones already in `DIM_PLAYERS`, fetches the others and loads them into `PLAYERS_INFO_RAW`.
+2. Fetches the play by play of every game (one mapped task per game).
+3. Collects every player who scored or assisted, and keeps only the ones not in `DIM_PLAYERS` yet, with a single query. Only those new players are fetched from the API.
+4. Loads everything into `NHL_RAW.RAW`: `GAMES_RAW`, `GAMES_PBP_RAW` and `PLAYERS_INFO_RAW`. The inserts only start once all the API calls are done, so the warehouse is up for a few seconds instead of during the whole run.
 5. Triggers the dbt Cloud production job and waits for it to finish. On a day without games, dbt is skipped.
 6. Stops the VM it runs on.
 
@@ -108,7 +108,7 @@ Two databases:
 * `NHL_RAW.RAW` holds the API responses as they come, in `VARIANT` columns. Nothing is updated or deleted: each load is appended with its load time, so any day can be rebuilt from raw.
 * `NHL_ANALYTICS` holds what dbt builds, in one schema per layer: `STAGING`, `INTERMEDIATE`, `MARTS`. Development runs write to prefixed schemas (`DBT_<user>_MARTS`), so they can never overwrite production.
 
-The Streamlit app connects with key pair authentication rather than a password.
+Airflow, dbt and the app each have their own Snowflake user, and they all share the same X-Small warehouse, `NHL_APP_WH`. The Streamlit app connects with key pair authentication rather than a password.
 
 ## dbt
 
@@ -132,7 +132,7 @@ This is the page I spent the most time on. It lists every game up to the chosen 
 
 * **Timeline**: one bar for the whole game, cut by period, in the colour of the team leading at that moment (grey when the score is tied). Each goal is the logo of the team that scored it, above the bar for the home team and below for the away team. Hovering over a goal shows the scorer's headshot, the assists, the score after the goal and the type of goal. In overtime the bar stops at the winning goal, and a shootout shows as one last goal for the winner.
 * **Points**: one bar per player who scored or assisted, in the team's colour, goals in full colour and assists lighter, with the player's headshot at the end of the bar.
-* **Goal log**: every goal, period by period, with the scorer, the assists, the score, the time and the situation: power play, short handed, empty net, extra attacker or even strength, with the number of skaters on each side (`5 on 4`).
+* **Goal log**: every goal, period by period, with the scorer, the assists, the score, the time and the situation: power play, short handed, empty net, extra attacker, penalty shot or even strength, with the number of skaters on each side (`5 on 4`).
 
 ### Standings
 
@@ -140,7 +140,7 @@ The standings table on any date, for the whole league, a conference or a divisio
 
 ### Evolution
 
-Each team's points above .500, game after game: points minus games played, so a team that takes one point per game on average stays at 0. It is a good way to compare teams that haven't played the same number of games. The idea comes from the standings chart on [MoneyPuck](https://moneypuck.com/standings.htm), which I liked a lot. There is one line per team, in its colours, with its logo at the end. On the right, a button per team (logo and abbreviation, grouped by division) highlights its line and fades the others, which is handy when 32 lines are on top of each other. Moving the date back replays the season up to that day, and the axes don't move, so two dates are easy to compare.
+Each team's points above .500, game after game: points minus games played, so a team that takes one point per game on average stays at 0. It is a good way to compare teams that haven't played the same number of games. The idea comes from the standings chart on [MoneyPuck](https://moneypuck.com/standings.htm), which I liked a lot. There is one line per team, in its colours, with its logo at the end. When several teams have the same record, their logos are placed side by side instead of on top of each other. On the right, a button per team (logo and abbreviation, grouped by division) highlights its line and fades the others, which is handy when 32 lines are on top of each other. Moving the date back replays the season up to that day, and the axes don't move, so two dates are easy to compare.
 
 ### Player stats
 
@@ -176,7 +176,7 @@ Secrets are kept out of the repo: `.env`, the Snowflake private keys, `airflow/c
 
 There is so much to do in terms of visualisation that this could go on forever. Some ideas for what comes next:
 
-* Team travel. The dbt model is already there (`fct_team_travel`): for every game, the arena a team comes from, the arena it plays in and the distance between the two. I've started a map of each team's trips over the season, and the next step is to compare teams: who travels the most, where, and whether the teams that travel more get worse results.
+* Team travel. The dbt model is already there (`fct_team_travel`): for every game, the arena a team comes from, the arena it plays in and the distance between the two. The next step is a page in the app with a map of each team's trips over the season, and a comparison of the teams: who travels the most, where, and whether the teams that travel more get worse results.
 * More advanced player stats.
 * Loading the full play by play instead of only the goals.
 * Visualisations built from the puck coordinates given for each event, such as shot maps.

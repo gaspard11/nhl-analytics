@@ -2,6 +2,7 @@
 
 Fetches the finished regular season games of one date from the NHL API, appends the raw JSON
 to NHL_RAW.RAW in Snowflake, then runs the dbt Cloud production job that builds the marts.
+All the API calls come first and the inserts at the end, so the warehouse only wakes up briefly.
 
 Scheduled runs load the previous day. Any date can be (re)loaded by triggering the DAG with
 game_date = YYYY-MM-DD: staging keeps only the latest load of each game, so reloading is safe.
@@ -188,6 +189,8 @@ def nhl_raw_pipeline():
     load_player_infos = load_player_infos_to_snowflake.expand(payload=player_infos_payloads)
 
     branch = check_has_games(games_payload)
+    # Inserts wait for the last API call. none_failed on the loads: a day without new players skips
+    # extract_player_infos, which must not skip the other inserts
     player_infos_payloads >> [load_games, load_game_pbp]
     [load_games, load_game_pbp, load_player_infos] >> branch
     branch >> [run_dbt, skip_dbt] >> stop_vm()

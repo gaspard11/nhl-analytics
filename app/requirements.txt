@@ -1,2 +1,5 @@
-streamlit>=1.28
+streamlit>=1.64
 snowflake-connector-python[pandas]
+altair
+pandas
+cryptography

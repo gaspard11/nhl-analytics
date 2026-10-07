@@ -78,13 +78,14 @@ The play by play gives a 4 digit `situation_code` for every goal: away goalie in
   * `EN` (empty net) when the other team had pulled its goalie,
   * `PPG` (power play) when the scoring team had more skaters,
   * `SHG` (short handed) when it had fewer,
+  * `EA` (extra attacker) when the scoring team had pulled its goalie and the sides were otherwise even, like 6 on 5,
   * `EV` (even strength) otherwise.
 
-A team that pulls its own goalie for an extra attacker is not on a power play, so that extra skater is left out when comparing the two sides.
+A team that pulls its own goalie for an extra attacker is not on a power play, so that extra skater is left out when comparing the two sides. The app reads these two columns directly to label each goal.
 
 ### Team travel (`fct_team_travel`)
 
-For every game of a team, this model gives the arena it played in and the arena of its previous game, with the distance between the two. The arena names and coordinates come from the `nhl_teams` seed, and the distance is computed with Snowflake's `haversine`. That is a straight line distance, not the real route. It is 0 when the team stays in the same arena, for example during a home stand, and null for the first game of the season. The app uses this model for its travel map.
+For every game of a team, this model gives the arena it played in and the arena of its previous game, with the distance between the two. The arena names and coordinates come from the `nhl_teams` seed, and the distance is computed with Snowflake's `haversine`. That is a straight line distance, not the real route. It is 0 when the team stays in the same arena, for example during a home stand, and null for the first game of the season. It isn't used by the app yet: a travel page is the next thing I want to build.
 
 ### Standings rules
 
@@ -98,6 +99,12 @@ Each day, teams are ranked on:
 6. head to head points % between the tied teams. When two teams have played an odd number of games against each other, the oldest game hosted by the team with the extra home game is left out.
 7. goal differential
 8. goals for
+
+Rule 6 is what shapes the models. Criteria 1 to 5 and 7 to 8 are season totals of each team on its own, but head to head can't be computed that way: it only makes sense between the teams that are still tied after rule 5, and it depends on which teams those are on that day. So the standings are built in three steps:
+
+1. `int_league_ranking_pre_tie_breaker` computes every team's totals per day, then gives a `tie_group_id` (macro `nhl_tie_group_id`) to the teams equal on criteria 1 to 5. Teams that aren't tied get none.
+2. `int_tied_teams_rate` only looks at those tie groups: for each one, it takes the games played so far between the teams of the group and computes each team's points % in them.
+3. `fct_league_rankings` brings the two together and ranks on all 8 criteria. A team that isn't tied gets a head to head rate of 0, which changes nothing, since rule 6 only separates teams already equal on the first 5.
 
 Day 0 is the day before a season's first game. Every team is at 0 and ranked last.
 
@@ -170,7 +177,7 @@ They are declared in the `_*__models.yml` files, next to the descriptions.
 | | `ranking` | not null |
 | `fct_games` | `game_id` | unique, not null |
 | `fct_goals` | `game_id` + `event_id` | unique together |
-| | `goal_type` | not null, one of `PS`, `EN`, `PPG`, `SHG`, `EV` |
+| | `goal_type` | not null, one of `PS`, `EN`, `PPG`, `SHG`, `EA`, `EV` |
 | `fct_team_travel` | `game_id` + `team_id` | unique together |
 | | `team_id` | not null, exists in `dim_teams` |
 | | `arena_name` | not null |
