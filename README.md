@@ -21,6 +21,7 @@ I tried to keep the project as cheap as possible while still learning tools that
 | dbt Cloud | Transformations | Free plan |
 | Snowflake | Data warehouse | About $5 to $15 a month during the season |
 | Streamlit Community Cloud | Hosts the app | Free |
+| GitHub Actions | Keeps the app awake | Free: a few minutes a day, well within the 2,000 free minutes a month |
 | Claude (Pro plan) | Teacher, debugging, code reviews (see [Disclaimer on AI usage](#disclaimer-on-ai-usage)) | $20 a month |
 
 **Airflow on GCP.** I could not leave my laptop on every morning, so Airflow runs on a GCP VM, which I set up with the help of Claude (see [Disclaimer on AI usage](#disclaimer-on-ai-usage)). A VM is not free, but Claude helped me find a way to keep it very cheap (see [Running Airflow on GCP for almost nothing](#running-airflow-on-gcp-for-almost-nothing)).
@@ -29,9 +30,11 @@ I tried to keep the project as cheap as possible while still learning tools that
 
 * **One X-Small warehouse.** The smallest size, billed 1 credit per hour of running time.
 * **Auto-suspend after 60 seconds.** The warehouse only runs while queries run. Each restart is billed for at least 60 seconds.
-* **A short daily load.** The Airflow load and the dbt run keep the warehouse up for a few minutes, about 0.05 to 0.15 credits a day ($0.10 to $0.30).
+* **A short daily load.** The Airflow load and the dbt run keep the warehouse up for a few minutes, about 0.3 credits a day. That is around $0.60 a day, so under $20 a month.
 * **App cache.** The app caches query results until the next morning's load, so visits mostly hit the cache instead of waking the warehouse.
 * **Tiny data.** Everything fits in a few dozen MB, so storage costs almost nothing.
+
+**Keeping the app awake.** On the free plan, Streamlit puts an app to sleep after 12 hours without a visit. The next visitor then lands on a "this app has gone to sleep" page and has to wait a minute for it to start, which is not great when the link is in a CV. Waking up also empties the app's cache, so every page queries Snowflake again. A scheduled GitHub Actions workflow opens every page of the app in a headless browser three times a day (00:10, 08:10 and 16:10 UTC), so it never reaches 12 hours without traffic. A simple ping would not be enough: Streamlit only counts a visit when a browser actually renders the page. The 08:10 run comes right after the daily cache refresh, so it also loads the day's data into the cache before the first real visitor. It costs a handful of queries a day in Snowflake, which the first visitor would have triggered anyway.
 
 Most of the bill comes from development rather than from the pipeline: a day of working on the app, or a large backfill, can cost as much as several weeks of daily runs. In the off season, the DAG finds no games and skips dbt, so the cost drops to almost zero.
 
@@ -43,6 +46,8 @@ This project could almost entirely have been vibe coded. The DAG, the dbt models
 * **Airflow.** I wrote the DAG myself, with Claude on the side as a teacher and to help me debug. The only task Claude Code wrote entirely is `stop_vm`, which shuts down the VM Airflow runs on, a part I knew very little about.
 * **Streamlit.** I wrote all the charts myself, again with Claude as a teacher when the documentation was not enough. Claude Code wrote these parts entirely: the CSS that draws the goal type "pills" in `games.py`, the buttons that highlight teams on the Evolution page in `evolution.py`, and the general styling, which I had not paid much attention to while building the charts. It also reorganised the code and added comments.
 * **GCP VM setup.** I relied on Claude heavily here, as I had very little knowledge of it, and mostly ran the commands it recommended.
+* **Keeping the app awake.** This part was written entirely by Claude Code: the GitHub Actions workflow and the Playwright script that visits the app to keep it awake.
+* **README files.** I wrote most of the text in the README files myself, but I let Claude Code write the lists describing the models, the lineage diagrams and the formatting.
 
 ## Architecture
 
