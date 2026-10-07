@@ -7,7 +7,7 @@ Scheduled runs load the previous day. Any date can be (re)loaded by triggering t
 game_date = YYYY-MM-DD: staging keeps only the latest load of each game, so reloading is safe.
 
 The DAG runs on a GCP VM that is only up around the scheduled run: an instance schedule starts
-it at 10:00 UTC and the last task, stop_vm, shuts it down.
+it at 06:00 UTC and the last task, stop_vm, shuts it down.
 """
 
 from datetime import datetime, timedelta
@@ -44,7 +44,7 @@ def insert_raw_payload(table, payload):
 
 @dag(
     dag_id="nhl_raw_pipeline",
-    schedule="15 10 * * *",  # 10:15 UTC, 15 minutes after the VM's instance schedule starts it
+    schedule="15 6 * * *",  # 06:15 UTC, 15 minutes after the VM's instance schedule starts it
     start_date=datetime(2026, 1, 1),
     catchup=False,
     tags=["nhl", "learning"],
