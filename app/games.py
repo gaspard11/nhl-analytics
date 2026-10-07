@@ -70,7 +70,7 @@ goals = run_query(
         on goals.assist1_player_id = assist1.player_id
     left join nhl_analytics.marts.dim_players as assist2
         on goals.assist2_player_id = assist2.player_id
-    order by games.game_date, games.game_id
+    order by games.game_date, games.game_id, goals.period_number, goals.time_in_period
     """
 )
 
