@@ -13,6 +13,7 @@ st.html("""<style>
 </style>""")
 
 LOGO_SIZE = 50  # pixels, logos at the end of the lines
+LOGO_SPACING = 40  # pixels between logos sharing a point, a bit less than a logo so they overlap slightly
 PLOT_HEIGHT = 650  # pixels, reaches the bottom of a 1080p screen under the controls
 PILLS_PER_ROW = 4  # a division (8 teams) is two rows, which fits the side column
 
@@ -89,6 +90,15 @@ def standing_evolution(teams, x_max, y_domain, highlighted=()):
     ]
 
     last_points = df_teams.sort_values("GAMES_PLAYED").groupby("TEAM").tail(1)
+    # Teams with the same record end on the same point: number them within the point (highlighted
+    # teams first, so they stay on the point itself) to place their logos side by side
+    last_points = (
+        last_points
+        .assign(IS_HIGHLIGHTED=last_points["TEAM"].isin(highlighted))
+        .sort_values(["IS_HIGHLIGHTED", "TEAM"], ascending=[False, True])
+    )
+    last_points["STACK_INDEX"] = last_points.groupby(["GAMES_PLAYED", "POINTS_ABOVE_AVERAGE"]).cumcount()
+    max_stack_index = int(last_points["STACK_INDEX"].max()) if len(last_points) else 0
 
     integer_axis = dict(format="d", tickMinStep=1)  # whole numbers only on the axes
     base = alt.Chart(df_teams).encode(
@@ -107,26 +117,44 @@ def standing_evolution(teams, x_max, y_domain, highlighted=()):
         ),
     )
 
-    logos = alt.Chart(last_points).mark_image(width=LOGO_SIZE, height=LOGO_SIZE).encode(
-        x="GAMES_PLAYED:Q",
-        y="POINTS_ABOVE_AVERAGE:Q",
-        url="LOGO_URL:N",
-        tooltip=tooltip,
-    )
+    is_highlighted = alt.FieldOneOfPredicate("TEAM", list(highlighted))
+
+    def logo_layer(stack_index):
+        """The logos with this index within their point, shifted right by that many logos.
+        xOffset is the same for a whole layer, hence one layer per index."""
+        layer = alt.Chart(last_points[last_points["STACK_INDEX"] == stack_index]).mark_image(
+            width=LOGO_SIZE, height=LOGO_SIZE, xOffset=stack_index * LOGO_SPACING
+        ).encode(
+            x="GAMES_PLAYED:Q",
+            y="POINTS_ABOVE_AVERAGE:Q",
+            url="LOGO_URL:N",
+            tooltip=tooltip,
+        )
+        if highlighted:
+            layer = layer.encode(opacity=alt.condition(is_highlighted, alt.value(1), alt.value(0.25)))
+        return layer
+
+    # Last index drawn first, so the logo on the point itself is on top
+    logos = alt.layer(*[logo_layer(index) for index in range(max_stack_index, -1, -1)])
 
     if highlighted:
-        is_highlighted = alt.FieldOneOfPredicate("TEAM", list(highlighted))
         # Every line faded, then the highlighted ones drawn again on top
         lines = (
             lines.encode(opacity=alt.value(0.15))
             + lines.transform_filter(is_highlighted).encode(strokeWidth=alt.value(3))
         )
-        logos = logos.encode(opacity=alt.condition(is_highlighted, alt.value(1), alt.value(0.25)))
 
     # Invisible points, one per team per game, to carry the tooltip
     points = base.mark_circle(size=100, opacity=0).encode(tooltip=tooltip)
 
-    st.altair_chart((lines + logos + points).properties(height=PLOT_HEIGHT), width="stretch")
+    st.altair_chart(
+        (lines + logos + points).properties(
+            height=PLOT_HEIGHT,
+            # Room for the logos side by side after the last game, so they aren't cut
+            padding={"left": 5, "top": 5, "bottom": 5, "right": LOGO_SIZE / 2 + max_stack_index * LOGO_SPACING},
+        ),
+        width="stretch",
+    )
 
 
 # ---------------------------------------------------------------------------
