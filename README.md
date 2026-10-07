@@ -2,6 +2,8 @@
 
 A daily data pipeline for the NHL regular season. Every morning it fetches the previous day's games from the NHL API, loads the raw JSON into Snowflake, turns it into standings and player rankings with dbt, and shows the results in a Streamlit app.
 
+The final app lives here: [https://nhl-app.streamlit.app/](https://nhl-app.streamlit.app/)
+
 ## Why this project exists
 
 This is a learning project. I wanted hands on practice with Airflow, dbt, Snowflake and Streamlit, and I needed a subject with real data that changes every day. The NHL was a good fit: the data is public, it updates daily during the season, and the standings rules are complex enough to be interesting to model.
