@@ -4,7 +4,7 @@ This is the transformation part of the project. It takes the raw NHL API data lo
 
 * the league standings for every day of the season, with all the NHL tie breakers,
 * the player rankings (goals, assists, points) for every day,
-* the games and goals, with the situation of each goal (power play, short handed, empty net),
+* the games and goals, with the situation of each goal (power play, short handed, empty net, penalty shot),
 * each team's travel from arena to arena during the season.
 
 The raw data is loaded into `NHL_RAW.RAW` by the Airflow DAG `nhl_raw_pipeline` (see the [main README](../README.md)). Once the load is done, the DAG triggers the dbt Cloud production job, which builds the tables in `NHL_ANALYTICS.MARTS` that the Streamlit app reads. The project runs in dbt Cloud and needs dbt 1.10 or later (or dbt Fusion).

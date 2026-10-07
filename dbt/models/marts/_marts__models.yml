@@ -152,7 +152,7 @@ models:
   - name: fct_goals
     description: >
       One row per goal of a finished game, shootout goals excluded, with the situation of the goal
-      (power play, short handed, empty net, even strength).
+      (power play, short handed, empty net, penalty shot, even strength).
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
