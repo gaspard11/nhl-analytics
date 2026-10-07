@@ -7,7 +7,28 @@ This is the transformation part of the project. It takes the raw NHL API data lo
 * the games and goals, with the situation of each goal (power play, short handed, empty net, penalty shot),
 * each team's travel from arena to arena during the season.
 
-The raw data is loaded into `NHL_RAW.RAW` by the Airflow DAG `nhl_raw_pipeline` (see the [main README](../README.md)). Once the load is done, the DAG triggers the dbt Cloud production job, which builds the tables in `NHL_ANALYTICS.MARTS` that the Streamlit app reads. The project runs in dbt Cloud and needs dbt 1.10 or later (or dbt Fusion).
+The raw data is loaded into `NHL_RAW.RAW` by the Airflow DAG `nhl_raw_pipeline` (see the [main README](../README.md)). Once the load is done, the DAG triggers the dbt Cloud production job, which builds the tables in `NHL_ANALYTICS.MARTS` that the Streamlit app reads. The project runs in dbt Cloud.
+
+### Standings rules
+
+Each day, teams are ranked on:
+
+1. points (win = 2, overtime or shootout loss = 1, regulation loss = 0)
+2. fewer games played
+3. regulation wins
+4. regulation and overtime wins
+5. total wins
+6. head to head points % between the tied teams. When two teams have played an odd number of games against each other, the oldest game hosted by the team with the extra home game is left out.
+7. goal differential
+8. goals for
+
+Rule 6 is what shapes the models. Criteria 1 to 5 and 7 to 8 are season totals of each team on its own, but head to head can't be computed that way: it only makes sense between the teams that are still tied after rule 5, and it depends on which teams those are on that day. So the standings are built in three steps:
+
+1. `int_league_ranking_pre_tie_breaker` computes every team's totals per day, then gives a `tie_group_id` (macro `nhl_tie_group_id`) to the teams equal on criteria 1 to 5. Teams that aren't tied get none.
+2. `int_tied_teams_rate` only looks at those tie groups: for each one, it takes the games played so far between the teams of the group and computes each team's points % in them.
+3. `fct_league_rankings` brings the two together and ranks on all 8 criteria. A team that isn't tied gets a head to head rate of 0, which changes nothing, since rule 6 only separates teams already equal on the first 5.
+
+Day 0 is the day before a season's first game. Every team is at 0 and ranked last.
 
 ## Lineage
 
@@ -48,23 +69,32 @@ There is one model per raw table. Each one parses the JSON and keeps only the la
 | Model | Materialization | What it does |
 |---|---|---|
 | `int_team_game_results` | view | One row per team per game, with `win`, `regulation_win`, `regulation_ot_win` and `points` |
-| `int_league_ranking_pre_tie_breaker` | incremental | Season to date totals per team and per day, plus day 0. This is where the running totals are stored |
+| `int_league_ranking_pre_tie_breaker` | incremental (delete+insert on `season, ranking_date`) | Season to date totals per team and per day, plus day 0. This is where the running totals are stored |
 | `int_tied_teams_rate` | view | Head to head points % between teams that are tied, per day |
-| `int_player_scoring_cumulative` | incremental | Season to date goals and assists per player and per day |
+| `int_player_scoring_cumulative` | incremental (delete+insert on `season, ranking_date`) | Season to date goals and assists per player and per day |
 
 ### Marts (`models/marts/`, schema `MARTS`)
 
 | Model | One row per | Materialization |
 |---|---|---|
-| `fct_league_rankings` | team and day | incremental |
-| `fct_player_goals_rankings` | player and day (players with at least one goal) | incremental |
-| `fct_player_assists_rankings` | player and day (players with at least one assist) | incremental |
-| `fct_player_points_rankings` | player and day | incremental |
+| `fct_league_rankings` | team and day | incremental (delete+insert on `season, ranking_date`) |
+| `fct_player_goals_rankings` | player and day (players with at least one goal) | incremental (delete+insert on `season, ranking_date`) |
+| `fct_player_assists_rankings` | player and day (players with at least one assist) | incremental (delete+insert on `season, ranking_date`) |
+| `fct_player_points_rankings` | player and day | incremental (delete+insert on `season, ranking_date`) |
 | `fct_games` | game | incremental (merge on `game_id`) |
 | `fct_goals` | goal | incremental (delete+insert on `game_id`) |
 | `fct_team_travel` | team and game | table |
 | `dim_players` | player | incremental (merge on `player_id`) |
 | `dim_teams` | team | table |
+
+### Seed and snapshot
+
+| Name | Type | What it does |
+|---|---|---|
+| `nhl_teams` | seed | The 32 teams, with conference, division, logo and home arena (name and coordinates). `dim_teams` is built from it |
+| `nhl_players_team_snapshot` | snapshot (check strategy on `team_id`, schema `SNAPSHOTS`) | History of each player's team. `dim_players` only keeps the current team, so the snapshot records a new version whenever it changes, for example after a trade |
+
+The snapshot only sees a change when it runs, and `dim_players` only updates a player's team when they record a point for their new team. So `dbt_valid_from` is the date the move was noticed, not the date of the trade.
 
 ### Goal situations (`fct_goals`)
 
@@ -86,27 +116,6 @@ A team that pulls its own goalie for an extra attacker is not on a power play, s
 ### Team travel (`fct_team_travel`)
 
 For every game of a team, this model gives the arena it played in and the arena of its previous game, with the distance between the two. The arena names and coordinates come from the `nhl_teams` seed, and the distance is computed with Snowflake's `haversine`. That is a straight line distance, not the real route. It is 0 when the team stays in the same arena, for example during a home stand, and null for the first game of the season. It isn't used by the app yet: a travel page is the next thing I want to build.
-
-### Standings rules
-
-Each day, teams are ranked on:
-
-1. points (win = 2, overtime or shootout loss = 1, regulation loss = 0)
-2. fewer games played
-3. regulation wins
-4. regulation and overtime wins
-5. total wins
-6. head to head points % between the tied teams. When two teams have played an odd number of games against each other, the oldest game hosted by the team with the extra home game is left out.
-7. goal differential
-8. goals for
-
-Rule 6 is what shapes the models. Criteria 1 to 5 and 7 to 8 are season totals of each team on its own, but head to head can't be computed that way: it only makes sense between the teams that are still tied after rule 5, and it depends on which teams those are on that day. So the standings are built in three steps:
-
-1. `int_league_ranking_pre_tie_breaker` computes every team's totals per day, then gives a `tie_group_id` (macro `nhl_tie_group_id`) to the teams equal on criteria 1 to 5. Teams that aren't tied get none.
-2. `int_tied_teams_rate` only looks at those tie groups: for each one, it takes the games played so far between the teams of the group and computes each team's points % in them.
-3. `fct_league_rankings` brings the two together and ranks on all 8 criteria. A team that isn't tied gets a head to head rate of 0, which changes nothing, since rule 6 only separates teams already equal on the first 5.
-
-Day 0 is the day before a season's first game. Every team is at 0 and ranked last.
 
 ### Macros
 

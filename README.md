@@ -10,6 +10,16 @@ Furthermore, I am a hockey fan and it is a stat heavy sport, so there are plenty
 
 I know the setup is overkill. The standings and player stats are already available on nhl.com, a single Python script on a cron could produce most of this, and the app could probably even call the NHL API directly without storing anything. The point was not the output but building the full chain the way it is done in a company: orchestration, a warehouse with raw and modelled layers, tested transformations, and a front end reading from the warehouse.
 
+## Hockey 101
+
+A few rules that help to follow the rest:
+
+* **Game length.** Three periods of 20 minutes, five skaters and a goalie on each side: that is regulation time (`REG`). There are no ties. If the score is level after regulation, the teams play a 5 minute overtime (`OT`), three against three, where the first goal wins. If nobody scores, a shootout (`SO`) decides the winner.
+* **Points.** A win is worth 2 points, however it was won. A loss in overtime or in the shootout is worth 1 point, a loss in regulation 0.
+* **Penalties.** A player who commits a foul goes to the penalty box, and their team plays with one skater less for a few minutes. The team with more players is on a power play: a goal it scores is a power play goal (`PPG`). A goal by the team with fewer players is a short handed goal (`SHG`).
+* **Pulled goalie.** A team can replace its goalie with an extra skater: when it is losing near the end of a game, or during a delayed penalty (the referee has called a penalty on the other team but waits until that team touches the puck). A goal scored with that extra skater is an extra attacker goal (`EA`). A goal scored into the empty net by the other team is an empty net goal (`EN`).
+* **Penalty shot.** After some fouls on a clear scoring chance, the player gets a one on one try against the goalie (`PS`).
+
 ## Tool choices and cost
 
 I tried to keep the project as cheap as possible while still learning tools that are used in companies.
@@ -45,7 +55,7 @@ This project could almost entirely have been vibe coded. The DAG, the dbt models
 * **Streamlit.** I wrote all the charts myself, again with Claude as a teacher when the documentation was not enough. Claude Code wrote these parts entirely: the CSS that draws the goal type "pills" in `games.py`, the buttons that highlight teams on the Evolution page in `evolution.py`, the logos placed side by side when teams share a point on that chart, and the general styling, which I had not paid much attention to while building the charts. It also reorganised the code and added comments.
 * **GCP VM setup.** I relied on Claude heavily here, as I had very little knowledge of it, and mostly ran the commands it recommended.
 * **Keeping the app awake.** This part was written entirely by Claude Code: the GitHub Actions workflow and the Playwright script that visits the app to keep it awake.
-* **README files.** I wrote most of the text in the README files myself, but I let Claude Code write the lists describing the models, the lineage diagrams and the formatting.
+* **README files.** I wrote most of the text in the README files myself, but I let Claude Code write the lists describing the steps and models, the lineage diagrams, tables and the formatting.
 
 ## Architecture
 
@@ -80,11 +90,11 @@ The DAG lives in [`airflow/dags/nhl_pipeline.py`](airflow/dags/nhl_pipeline.py).
 1. Calls the NHL stats API for the finished regular season games of that day.
 2. Fetches the play by play of every game (one mapped task per game).
 3. Collects every player who scored or assisted, and keeps only the ones not in `DIM_PLAYERS` yet, with a single query. Only those new players are fetched from the API.
-4. Loads everything into `NHL_RAW.RAW`: `GAMES_RAW`, `GAMES_PBP_RAW` and `PLAYERS_INFO_RAW`. The inserts only start once all the API calls are done, so the warehouse is up for a few seconds instead of during the whole run.
+4. Loads everything into `NHL_RAW.RAW`: `GAMES_RAW`, `GAMES_PBP_RAW` and `PLAYERS_INFO_RAW`. The inserts only start once all the API calls are done, so the warehouse is up for a few seconds.
 5. Triggers the dbt Cloud production job and waits for it to finish. On a day without games, dbt is skipped.
 6. Stops the VM it runs on.
 
-The DAG takes the date to load as a parameter. Scheduled runs load the day before, but any past date can be loaded again, which is how I backfilled earlier games. Loading the same date twice does no harm, because staging only keeps the latest load of each game.
+The DAG takes the date to load as a parameter. Scheduled runs load the day before, but any past date can be loaded again, which is how I backfilled earlier games. Loading the same date twice does no harm, because dbt staging models only keep the latest load of each game.
 
 Snowflake and dbt Cloud are reached through two Airflow connections (`snowflake_conn_25` and `dbt_conn_gas25`), created on the VM and not stored in the repo.
 
@@ -92,10 +102,10 @@ Snowflake and dbt Cloud are reached through two Airflow connections (`snowflake_
 
 Airflow needs a machine that is on when the DAG runs. The job takes less than half an hour, so paying for a machine that runs all day would be a waste. Instead, the VM is only on for about an hour each morning:
 
-* **A cheap, interruptible machine.** The VM is a "spot" VM: Google sells its spare capacity at a large discount, with the catch that it can take the machine back at any time. For a daily job that can simply run again, that is a good deal.
+* **A small, standard machine.** I started with a "spot" VM, which Google sells at a large discount with the catch that it can take the machine back at any time, or refuse to start it when it has no spare capacity. A run cut in the middle, or a morning without a VM, means a day of games that is not loaded. Since the VM is only on for about an hour a day, a standard e2-medium costs about a dollar a month, so the discount was not worth that risk.
 * **It starts on a timer.** GCP starts the VM at 06:00 UTC, just before the DAG, and stops it at 07:00 UTC in case anything went wrong.
 * **It turns itself off.** The last task of the DAG, `stop_vm`, shuts down the machine it runs on as soon as the work is done, even if an earlier task failed. That way a broken run never leaves the VM running (and billing) all day. When I start the DAG by hand, the VM stays on so I can keep working.
-* **It can only turn itself off.** The VM has permission to stop itself and nothing else, so even if someone got into it, they could not touch the rest of the GCP project.
+* **It can only turn itself off.** The VM has permission to stop itself and nothing else, so even if someone got into it, they could not touch the rest of the GCP project.v
 
 The VM also runs a lighter version of Airflow than the one I use on my laptop. The standard setup is built to share work across several machines, which is unnecessary for one small daily job, so the VM runs everything in a single place with fewer moving parts ([`docker-compose.vm.yaml`](airflow/docker-compose.vm.yaml)). The extra packages Airflow needs to talk to Snowflake and dbt Cloud are installed once, when the image is built ([`Dockerfile`](airflow/Dockerfile)), instead of every time the VM starts. This lets Airflow fit on a small, cheap machine and start faster each morning.
 
@@ -153,24 +163,29 @@ The data only changes once a day, so query results are cached until 08:00 UTC, a
 ## Repository layout
 
 ```
-airflow/                       Airflow
-  dags/                        the DAG
+airflow/
+  dags/nhl_pipeline.py         the daily DAG
   Dockerfile                   Airflow image with the Snowflake and dbt Cloud providers
   docker-compose.yaml          local Airflow (CeleryExecutor)
   docker-compose.vm.yaml       Airflow on the GCP VM (LocalExecutor)
-dbt/                           dbt project (models, tests, seeds, snapshots, macros)
-app/                           Streamlit app
-.github/                       GitHub Actions workflow that keeps the app awake
+dbt/
+  models/                      staging, intermediate and marts
+  tests/                       singular tests
+  macros/, seeds/, snapshots/
+  README.md                    models, tests and the incremental logic in detail
+app/
+  app.py                       entry point and navigation
+  games.py, game_details.py    Games page
+  standings.py                 Standings page
+  evolution.py                 Evolution page
+  player_stats.py              Player stats page
+  common.py                    Snowflake access, daily cache, team colours, shared controls
+.github/
+  workflows/keep-app-awake.yml visits the app three times a day
+  scripts/keep_app_awake.py    the headless browser script it runs
 ```
 
-Secrets are kept out of the repo: `.env`, the Snowflake private keys, `airflow/config/airflow.cfg` and the Streamlit `secrets.toml` are all ignored by git.
-
-## Limitations
-
-* Regular season only. Playoffs, with several overtimes of 20 minutes, are not handled.
-* Teams come from a seed of the current 32 franchises, so older seasons with other teams would need a per season team list.
-* `stop_vm` is the last task of the DAG and runs whatever happens before it, so a failed run still ends green in the Airflow grid. The colour of each task has to be checked to see a failure.
-* No alerting on the pipeline yet: a failed Airflow run is only noticed by looking at Airflow or at the app. The only check is indirect: the keep-awake workflow fails, and GitHub sends an email, if a page of the app does not load or shows an error.
+Secrets are kept out of the repo: the `.env` file, the Snowflake private keys, `airflow/config/airflow.cfg` and the Streamlit `secrets.toml` are all ignored by git.
 
 ## Work in progress
 
