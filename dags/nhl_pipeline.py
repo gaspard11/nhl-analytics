@@ -73,7 +73,7 @@ def nhl_raw_pipeline():
         response.raise_for_status()
         return response.json()
 
-    @task
+    @task(trigger_rule="none_failed")
     def load_games_to_snowflake(payload: dict):
         # Nothing to load on a day without games
         if payload.get("data"):
@@ -107,30 +107,32 @@ def nhl_raw_pipeline():
         return list(player_ids)
 
     @task
-    def extract_player_infos(player_id: int):
-        # Players are loaded once: skip the ones already in DIM_PLAYERS
+    def filter_new_player_ids(player_ids: list):
+        # Players are loaded once: keep only the ones not yet in DIM_PLAYERS
         hook = SnowflakeHook(snowflake_conn_id=SNOWFLAKE_CONN_ID)
         conn = hook.get_conn()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT 1 FROM NHL_ANALYTICS.MARTS.DIM_PLAYERS WHERE PLAYER_ID = %s LIMIT 1",
-            (player_id,),
+            "SELECT player_id FROM NHL_ANALYTICS.MARTS.DIM_PLAYERS"
         )
-        already_loaded = cursor.fetchone() is not None
+        rows = cursor.fetchall()
         cursor.close()
         conn.close()
-        if already_loaded:
-            return None
+        known_ids = {row[0] for row in rows}
+        new_ids = set(player_ids) - known_ids
+        return list(new_ids)
 
+    @task
+    def extract_player_infos(player_id: int):
         response = requests.get(f"https://api-web.nhle.com/v1/player/{player_id}/landing")
         response.raise_for_status()
         return response.json()
 
-    @task
+    @task(trigger_rule="none_failed")
     def load_game_pbp_to_snowflake(payload: dict):
         insert_raw_payload("GAMES_PBP_RAW", payload)
 
-    @task
+    @task(trigger_rule="none_failed")
     def load_player_infos_to_snowflake(payload: dict):
         insert_raw_payload("PLAYERS_INFO_RAW", payload)
 
@@ -178,13 +180,15 @@ def nhl_raw_pipeline():
     game_pbp_payloads = extract_game_pbp.expand(game_id=game_ids)
 
     player_ids = extract_player_ids(game_pbp_payloads)
-    player_infos_payloads = extract_player_infos.expand(player_id=player_ids)
+    new_ids = filter_new_player_ids(player_ids)
+    player_infos_payloads = extract_player_infos.expand(player_id=new_ids)
 
     load_games = load_games_to_snowflake(games_payload)
     load_game_pbp = load_game_pbp_to_snowflake.expand(payload=game_pbp_payloads)
     load_player_infos = load_player_infos_to_snowflake.expand(payload=player_infos_payloads)
 
     branch = check_has_games(games_payload)
+    player_infos_payloads >> [load_games, load_game_pbp]
     [load_games, load_game_pbp, load_player_infos] >> branch
     branch >> [run_dbt, skip_dbt] >> stop_vm()
 

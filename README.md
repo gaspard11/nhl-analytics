@@ -17,9 +17,9 @@ I tried to keep the project as cheap as possible while still learning tools that
 | Tool | Role | Cost |
 |---|---|---|
 | Airflow | Orchestration | Free (open source), but it needs a machine to run on |
-| GCP VM | Runs Airflow every morning | Low: the VM is only up about an hour a day |
+| GCP VM | Runs Airflow every morning | Less than $5 a month: the VM is only up about an hour a day |
 | dbt Cloud | Transformations | Free plan |
-| Snowflake | Data warehouse | About $5 to $15 a month during the season |
+| Snowflake | Data warehouse | Under $20 a month |
 | Streamlit Community Cloud | Hosts the app | Free |
 | GitHub Actions | Keeps the app awake | Free: a few minutes a day, well within the 2,000 free minutes a month |
 | Claude (Pro plan) | Teacher, debugging, code reviews (see [Disclaimer on AI usage](#disclaimer-on-ai-usage)) | $20 a month |
@@ -28,15 +28,13 @@ I tried to keep the project as cheap as possible while still learning tools that
 
 **Snowflake.** The warehouse is the hardest part to make cheap. As said above, a warehouse is not needed for a project this size, but learning one was the point, so I chose Snowflake on the Standard edition, at $2 per credit. What keeps the bill down:
 
-* **One X-Small warehouse.** The smallest size, billed 1 credit per hour of running time.
+* **One X-Small warehouse.** `NHL_APP_WH`, shared by Airflow, dbt and the app. It is the smallest size, billed 1 credit per hour of running time, and one warehouse means one start-up instead of three when the tools run back to back.
 * **Auto-suspend after 60 seconds.** The warehouse only runs while queries run. Each restart is billed for at least 60 seconds.
 * **A short daily load.** The Airflow load and the dbt run keep the warehouse up for a few minutes, about 0.3 credits a day. That is around $0.60 a day, so under $20 a month.
 * **App cache.** The app caches query results until the next morning's load, so visits mostly hit the cache instead of waking the warehouse.
 * **Tiny data.** Everything fits in a few dozen MB, so storage costs almost nothing.
 
 **Keeping the app awake.** On the free plan, Streamlit puts an app to sleep after 12 hours without a visit. The next visitor then lands on a "this app has gone to sleep" page and has to wait a minute for it to start, which is not great when the link is in a CV. Waking up also empties the app's cache, so every page queries Snowflake again. A scheduled GitHub Actions workflow opens every page of the app in a headless browser three times a day (00:10, 08:10 and 16:10 UTC), so it never reaches 12 hours without traffic. A simple ping would not be enough: Streamlit only counts a visit when a browser actually renders the page. The 08:10 run comes right after the daily cache refresh, so it also loads the day's data into the cache before the first real visitor. It costs a handful of queries a day in Snowflake, which the first visitor would have triggered anyway.
-
-Most of the bill comes from development rather than from the pipeline: a day of working on the app, or a large backfill, can cost as much as several weeks of daily runs. In the off season, the DAG finds no games and skips dbt, so the cost drops to almost zero.
 
 ## Disclaimer on AI usage
 
@@ -58,7 +56,7 @@ NHL API
 Snowflake  NHL_RAW.RAW          raw JSON, append only
    │   (dbt Cloud production job, triggered by Airflow)
    ▼
-Snowflake  NHL_ANALYTICS.MARTS  standings, games, goals, player rankings
+Snowflake  NHL_ANALYTICS.MARTS  standings, games, goals, player rankings, team travel
    │
    ▼
 Streamlit app                   games, standings, evolution, player stats
@@ -73,6 +71,7 @@ A normal day:
 | right after | The DAG loads the raw data, triggers the dbt Cloud job, waits for it, then shuts the VM down. The whole run takes less than half an hour. |
 | 07:00 | Backup: the instance schedule stops the VM if it is still running. |
 | 08:00 | The Streamlit app drops its cache and reads the new data. |
+| 08:10 | GitHub Actions opens every page of the app, which keeps it awake and loads the new data into its cache. It visits again at 16:10 and 00:10. |
 
 ## Airflow
 
@@ -149,7 +148,7 @@ Players ranked by points, goals or assists on the chosen date, with their headsh
 
 ### Cache
 
-The data only changes once a day, so query results are cached until 08:00 UTC, after the morning load. Snowflake is then queried once for the day rather than on every visit.
+The data only changes once a day, so query results are cached until 08:00 UTC, after the morning load. Each query then runs once a day rather than on every visit, and the 08:10 keep-awake run triggers it before the first real visitor (see [Keeping the app awake](#tool-choices-and-cost)). The cache lives in the app's memory, so it is also emptied when the app restarts.
 
 ## Repository layout
 
@@ -157,6 +156,7 @@ The data only changes once a day, so query results are cached until 08:00 UTC, a
 dags/                    Airflow DAG
 dbt/                     dbt project (models, tests, seeds, snapshots, macros)
 app/                     Streamlit app
+.github/                 GitHub Actions workflow that keeps the app awake
 Dockerfile               Airflow image with the Snowflake and dbt Cloud providers
 docker-compose.yaml      local Airflow (CeleryExecutor)
 docker-compose.vm.yaml   Airflow on the GCP VM (LocalExecutor)
@@ -169,7 +169,7 @@ Secrets are kept out of the repo: `.env`, the Snowflake private keys, `config/ai
 * Regular season only. Playoffs, with several overtimes of 20 minutes, are not handled.
 * Teams come from a seed of the current 32 franchises, so older seasons with other teams would need a per season team list.
 * `stop_vm` is the last task of the DAG and runs whatever happens before it, so a failed run still ends green in the Airflow grid. The colour of each task has to be checked to see a failure.
-* No alerting yet: a failed run is only noticed by looking at Airflow or at the app.
+* No alerting on the pipeline yet: a failed Airflow run is only noticed by looking at Airflow or at the app. The only check is indirect: the keep-awake workflow fails, and GitHub sends an email, if a page of the app does not load or shows an error.
 
 ## Work in progress
 
