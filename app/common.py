@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import streamlit as st
 from cryptography.hazmat.primitives import serialization
+from snowflake.connector.errors import ProgrammingError
 
 
 # Main colour of each team's logo: evolution lines, game timeline, points chart
@@ -96,7 +97,11 @@ def data_version():
 def _cached_query(sql, version):
     """The cache is keyed on the arguments: `version` is unused in the body, it only makes a new
     day a new cache entry. A cursor is used rather than conn.query, which has its own ttl cache."""
-    return get_connection().cursor().execute(sql).fetch_pandas_all()
+    try:
+        return get_connection().cursor().execute(sql).fetch_pandas_all()
+    except ProgrammingError:
+        get_connection().reset()
+        return get_connection().cursor().execute(sql).fetch_pandas_all()
 
 
 def run_query(sql):
