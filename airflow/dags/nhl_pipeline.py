@@ -90,52 +90,9 @@ def nhl_raw_pipeline():
         response.raise_for_status()
         return response.json()
 
-    @task
-    def extract_player_ids(payloads: list):
-        """Every player with a goal or an assist that day, once even with several points."""
-        player_ids = set()
-        for payload in payloads:
-            for play in payload.get("plays", []):
-                if play["typeDescKey"] != "goal":
-                    continue
-                details = play["details"]
-                # Shootout goals don't count as goals in player stats
-                if play["periodDescriptor"]["periodType"] != "SO":
-                    player_ids.add(int(details["scoringPlayerId"]))
-                for assist in ("assist1PlayerId", "assist2PlayerId"):
-                    if assist in details:
-                        player_ids.add(int(details[assist]))
-        return list(player_ids)
-
-    @task
-    def filter_new_player_ids(player_ids: list):
-        # Players are loaded once: keep only the ones not yet in DIM_PLAYERS
-        hook = SnowflakeHook(snowflake_conn_id=SNOWFLAKE_CONN_ID)
-        conn = hook.get_conn()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT player_id FROM NHL_ANALYTICS.MARTS.DIM_PLAYERS"
-        )
-        rows = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        known_ids = {row[0] for row in rows}
-        new_ids = set(player_ids) - known_ids
-        return list(new_ids)
-
-    @task
-    def extract_player_infos(player_id: int):
-        response = requests.get(f"https://api-web.nhle.com/v1/player/{player_id}/landing")
-        response.raise_for_status()
-        return response.json()
-
     @task(trigger_rule="none_failed")
     def load_game_pbp_to_snowflake(payload: dict):
         insert_raw_payload("GAMES_PBP_RAW", payload)
-
-    @task(trigger_rule="none_failed")
-    def load_player_infos_to_snowflake(payload: dict):
-        insert_raw_payload("PLAYERS_INFO_RAW", payload)
 
     @task.branch(trigger_rule="none_failed")
     def check_has_games(games_payload):
@@ -180,19 +137,14 @@ def nhl_raw_pipeline():
     game_ids = extract_game_ids(games_payload)
     game_pbp_payloads = extract_game_pbp.expand(game_id=game_ids)
 
-    player_ids = extract_player_ids(game_pbp_payloads)
-    new_ids = filter_new_player_ids(player_ids)
-    player_infos_payloads = extract_player_infos.expand(player_id=new_ids)
-
     load_games = load_games_to_snowflake(games_payload)
     load_game_pbp = load_game_pbp_to_snowflake.expand(payload=game_pbp_payloads)
-    load_player_infos = load_player_infos_to_snowflake.expand(payload=player_infos_payloads)
 
     branch = check_has_games(games_payload)
-    # Inserts wait for the last API call. none_failed on the loads: a day without new players skips
-    # extract_player_infos, which must not skip the other inserts
-    player_infos_payloads >> [load_games, load_game_pbp]
-    [load_games, load_game_pbp, load_player_infos] >> branch
+    # Inserts wait for the last API call. none_failed on the loads: a day without games skips
+    # extract_game_pbp, which must not skip the games insert
+    game_pbp_payloads >> load_games
+    [load_games, load_game_pbp] >> branch
     branch >> [run_dbt, skip_dbt] >> stop_vm()
 
 

@@ -40,14 +40,15 @@ NHL_RAW.RAW (append only, every load is kept)
 │                                               ├──► int_tied_teams_rate ◄───────────────────────────────────────────┤
 │                                               │           │                                                         │
 │                                               │           └──────────────► fct_league_rankings ◄───────────────────┘
-│                                               ├──► fct_games ──► fct_team_travel ◄── dim_teams
-│                                               │
-├── GAMES_PBP_RAW ──────► stg_nhl_api__goals ───┼──► int_player_scoring_cumulative ──► fct_player_goals_rankings
-│                                               │     (cumulative, incremental)         fct_player_assists_rankings
-│                                               │                                       fct_player_points_rankings
-│                                               ├──► fct_goals (also uses stg_nhl_api__games)
-│                                               │
-└── PLAYERS_INFO_RAW ───► stg_nhl_api__players ─┴──► dim_players ──► snapshot nhl_players_team_snapshot
+│                                               └──► fct_games ──► fct_team_travel ◄── dim_teams
+│
+└── GAMES_PBP_RAW ──────► stg_nhl_api__pbp ─────┬──► fct_games_events (also uses stg_nhl_api__games)
+                                                ├──► stg_nhl_api__goals ──┬──► int_player_scoring_cumulative ──► fct_player_goals_rankings
+                                                │                         │     (cumulative, incremental)         fct_player_assists_rankings
+                                                │                         │                                       fct_player_points_rankings
+                                                │                         └──► fct_goals (also uses stg_nhl_api__games)
+                                                └──► stg_nhl_api__game_rosters ──┬──► fct_game_rosters ──► snapshot nhl_players_team_snapshot (also uses fct_games)
+                                                                                 └──► dim_players (also uses stg_nhl_api__games)
 
 seed nhl_teams ──► dim_teams
 ```
@@ -56,13 +57,14 @@ seed nhl_teams ──► dim_teams
 
 ### Staging (`models/staging/nhl_api/`, views in `STAGING`)
 
-There is one model per raw table. Each one parses the JSON and keeps only the latest load of each game or player (`qualify row_number() over (... order by fetched_at desc) = 1`). Because of that, loading the same date twice changes nothing.
+The models reading a raw table parse the JSON and keep only the latest load of each game (`qualify row_number() over (... order by fetched_at desc) = 1`). Because of that, loading the same date twice changes nothing.
 
 | Model | One row per | Notes |
 |---|---|---|
 | `stg_nhl_api__games` | finished regular season game | Only `gameStateId = 7` (final). `last_period_type` is `REG`, `OT` or `SO` |
-| `stg_nhl_api__goals` | goal, shootouts excluded | The latest play by play of each game is picked before flattening, so no goal is lost |
-| `stg_nhl_api__players` | player | `current_team_id` is the team at load time and can be out of date |
+| `stg_nhl_api__pbp` | play (event) | The latest play by play of each game is picked before flattening, so no play is lost. `player_1_id` to `player_3_id` hold the players involved, and `player_*_desc` says what each one did |
+| `stg_nhl_api__goals` | goal, shootouts excluded | Built from `stg_nhl_api__pbp`: scorer and assists are `player_1_id` to `player_3_id` |
+| `stg_nhl_api__game_rosters` | player and game | Every player who dressed, from the `rosterSpots` of the latest play by play: name, team, position, sweater number, headshot |
 
 ### Intermediate (`models/intermediate/`, schema `INTERMEDIATE`)
 
@@ -83,6 +85,8 @@ There is one model per raw table. Each one parses the JSON and keeps only the la
 | `fct_player_points_rankings` | player and day | incremental (delete+insert on `season, ranking_date`) |
 | `fct_games` | game | incremental (merge on `game_id`) |
 | `fct_goals` | goal | incremental (delete+insert on `game_id`) |
+| `fct_games_events` | play | incremental (delete+insert on `game_id`) |
+| `fct_game_rosters` | player and game | incremental (`unique_key` `game_id`) |
 | `fct_team_travel` | team and game | table |
 | `dim_players` | player | incremental (merge on `player_id`) |
 | `dim_teams` | team | table |
@@ -171,7 +175,6 @@ They are declared in the `_*__models.yml` files, next to the descriptions.
 | | `last_period_type` | one of `REG`, `OT`, `SO` |
 | `stg_nhl_api__goals` | `game_id` + `event_id` | unique together |
 | | `game_id`, `event_id`, `scoring_player_id` | not null |
-| `stg_nhl_api__players` | `player_id` | unique, not null |
 | `int_team_game_results` | `game_id` + `team_id` | unique together |
 | | `points` | one of 0, 1, 2 |
 | `int_league_ranking_pre_tie_breaker` | `season` + `ranking_date` + `team_id` | unique together |
@@ -218,4 +221,3 @@ They are in `tests/`. Each one returns the rows that break its rule, so a passin
 * Regular season only: the DAG requests `gameType = 2`, and the `REG` / `OT` / `SO` logic assumes a single overtime period.
 * Teams come from the `nhl_teams` seed, with the current 32 franchises and their current arenas. An older season with other teams, or a game played at a neutral site (like the Global Series games in Europe), would need more than one arena per team.
 * Shootouts: the final score gives the shootout winner one extra goal, as the NHL does. Shootout goals are left out of the play by play and of player stats.
-* `stg_nhl_api__players.current_team_id` is the team when the player was first loaded, since players are only loaded once. `dim_players.team_id` uses the team of the player's latest game with a point instead.
