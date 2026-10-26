@@ -10,5 +10,3 @@ sources:
         description: One NHL stats API payload (all regular-season games of one date) per load.
       - name: GAMES_PBP_RAW
         description: One play-by-play payload (one game) per load.
-      - name: PLAYERS_INFO_RAW
-        description: One player landing payload per load. Only loaded for players not yet in dim_players.

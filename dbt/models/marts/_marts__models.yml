@@ -251,7 +251,9 @@ models:
                 min_value: 0
 
   - name: dim_players
-    description: One row per player who has recorded a point, with the team of their most recent game with a point.
+    description: >
+      One row per player who has dressed for at least one game, with the team, sweater number and
+      details of their most recent game, from the play-by-play rosters.
     columns:
       - name: player_id
         description: "{{ doc('player_id') }}"
@@ -266,8 +268,10 @@ models:
         description: Position code from the NHL API. C = center, L = left wing, R = right wing, D = defense, G = goalie.
       - name: team_id
         description: >
-          Team of the player's most recent game with a goal or assist. Joins to `dim_teams.team_id`.
+          Team of the player's most recent game. Joins to `dim_teams.team_id`.
           Changes over time are tracked in the snapshot `nhl_players_team_snapshot`.
+      - name: sweater_number
+        description: Player's jersey number in their most recent game.
       - name: headshot_url
         description: URL of the player's headshot image on the NHL site.
       - name: fetched_at

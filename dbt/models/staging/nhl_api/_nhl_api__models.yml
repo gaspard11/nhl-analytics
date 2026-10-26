@@ -54,11 +54,3 @@ models:
           - not_null
       - name: situation_code
         description: "{{ doc('situation_code') }}"
-
-  - name: stg_nhl_api__players
-    description: One row per player, from the latest load of that player in PLAYERS_INFO_RAW.
-    columns:
-      - name: player_id
-        data_tests:
-          - unique
-          - not_null

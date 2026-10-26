@@ -91,10 +91,9 @@ The DAG lives in [`airflow/dags/nhl_pipeline.py`](airflow/dags/nhl_pipeline.py).
 
 1. Calls the NHL stats API for the finished regular season games of that day.
 2. Fetches the play by play of every game (one mapped task per game).
-3. Collects every player who scored or assisted, and keeps only the ones not in `DIM_PLAYERS` yet, with a single query. Only those new players are fetched from the API.
-4. Loads everything into `NHL_RAW.RAW`: `GAMES_RAW`, `GAMES_PBP_RAW` and `PLAYERS_INFO_RAW`. The inserts only start once all the API calls are done, so the warehouse is up for a few seconds.
-5. Triggers the dbt Cloud production job and waits for it to finish. On a day without games, dbt is skipped.
-6. Stops the VM it runs on.
+3. Loads everything into `NHL_RAW.RAW`: `GAMES_RAW` and `GAMES_PBP_RAW`. The play by play also holds each game's rosters, which is where the player names and teams come from. The inserts only start once all the API calls are done, so the warehouse is up for a few seconds.
+4. Triggers the dbt Cloud production job and waits for it to finish. On a day without games, dbt is skipped.
+5. Stops the VM it runs on.
 
 The DAG takes the date to load as a parameter. Scheduled runs load the day before, but any past date can be loaded again, which is how I backfilled earlier games. Loading the same date twice does no harm, because dbt staging models only keep the latest load of each game.
 
