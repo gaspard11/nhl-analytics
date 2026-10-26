@@ -4,7 +4,7 @@ Fetches the finished regular season games of one date from the NHL API, appends 
 to NHL_RAW.RAW in Snowflake, then runs the dbt Cloud production job that builds the marts.
 All the API calls come first and the inserts at the end, so the warehouse only wakes up briefly.
 
-Scheduled runs load the previous day. Any date can be (re)loaded by triggering the DAG with
+Scheduled runs load the previous day and the day before, to include the games that were not finished. Any date can be (re)loaded by triggering the DAG with
 game_date = YYYY-MM-DD: staging keeps only the latest load of each game, so reloading is safe.
 
 The DAG runs on a GCP VM that is only up around the scheduled run: an instance schedule starts
@@ -61,13 +61,18 @@ def insert_raw_payload(table, payload):
 def nhl_raw_pipeline():
 
     @task
-    def extract_nhl_data(**kwargs):
+    def get_game_dates(**kwargs):
         game_date = kwargs["params"]["game_date"]
-        if game_date == "yesterday":
-            # Games end late in North America: the morning run loads the day before
-            game_date = (kwargs["dag_run"].run_after - timedelta(days=1)).strftime("%Y-%m-%d")
-        game_date = game_date.replace("-", "")
+        if game_date != "yesterday":
+            return [game_date]
+        # Games end late in North America: the morning run loads the day before. The day before that
+        # is loaded again, for games that weren't final yet at the previous run
+        run_after = kwargs["dag_run"].run_after
+        return [(run_after - timedelta(days=n)).strftime("%Y-%m-%d") for n in (1, 2)]
 
+    @task
+    def extract_nhl_data(game_date: str):
+        game_date = game_date.replace("-", "")
         # gameType=2: regular season only
         url = f"https://api.nhle.com/stats/rest/en/game?cayenneExp=gameDate=%22{game_date}%22%20and%20gameType=2"
         response = requests.get(url)
@@ -81,8 +86,8 @@ def nhl_raw_pipeline():
             insert_raw_payload("GAMES_RAW", payload)
 
     @task
-    def extract_game_ids(payload: dict):
-        return [game["id"] for game in payload.get("data", [])]
+    def extract_game_ids(payloads: list):
+        return [game["id"] for payload in payloads for game in payload.get("data", [])]
 
     @task
     def extract_game_pbp(game_id: int):
@@ -95,8 +100,8 @@ def nhl_raw_pipeline():
         insert_raw_payload("GAMES_PBP_RAW", payload)
 
     @task.branch(trigger_rule="none_failed")
-    def check_has_games(games_payload):
-        return "run_dbt" if games_payload.get("data") else "skip_dbt"
+    def check_has_games(payloads: list):
+        return "run_dbt" if any(payload.get("data") for payload in payloads) else "skip_dbt"
 
     skip_dbt = EmptyOperator(task_id="skip_dbt")
 
@@ -132,15 +137,16 @@ def nhl_raw_pipeline():
         )
         response.raise_for_status()
 
-    games_payload = extract_nhl_data()
+    game_dates = get_game_dates()
+    games_payloads = extract_nhl_data.expand(game_date=game_dates)
 
-    game_ids = extract_game_ids(games_payload)
+    game_ids = extract_game_ids(games_payloads)
     game_pbp_payloads = extract_game_pbp.expand(game_id=game_ids)
 
-    load_games = load_games_to_snowflake(games_payload)
+    load_games = load_games_to_snowflake.expand(payload=games_payloads)
     load_game_pbp = load_game_pbp_to_snowflake.expand(payload=game_pbp_payloads)
 
-    branch = check_has_games(games_payload)
+    branch = check_has_games(games_payloads)
     # Inserts wait for the last API call. none_failed on the loads: a day without games skips
     # extract_game_pbp, which must not skip the games insert
     game_pbp_payloads >> load_games
