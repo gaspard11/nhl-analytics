@@ -15,6 +15,6 @@ select
     time_in_period,
     time_remaining_in_period,
     fetched_at
-from {{ ref('stg_nhl_api__pbp') }},
+from {{ ref('stg_nhl_api__pbp') }}
 where event_type = 'goal'
   and period_descriptor <> 'SO'

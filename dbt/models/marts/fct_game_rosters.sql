@@ -1,6 +1,4 @@
-{{ config(materialized='incremental', unique_key='game_id') }}
-
--- One row per finished game. New or reloaded games are merged on game_id.
+{{ config(materialized='incremental', unique_key='game_id', incremental_strategy='delete+insert') }}
 
 select
     game_id,
