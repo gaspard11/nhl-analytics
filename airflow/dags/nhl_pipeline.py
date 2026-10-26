@@ -25,7 +25,7 @@ from airflow.providers.snowflake.hooks.snowflake import SnowflakeHook
 
 SNOWFLAKE_CONN_ID = "snowflake_conn_25"
 DBT_CLOUD_CONN_ID = "dbt_conn_gas25"
-DBT_CLOUD_JOB_ID = 70506183139286  # production job
+DBT_CLOUD_JOB_ID = 70506183143612  # production job
 
 GCE_METADATA_URL = "http://169.254.169.254/computeMetadata/v1"
 
