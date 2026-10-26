@@ -31,7 +31,7 @@ select
         when 'shot-on-goal'        then 'shooting_player_id'
         when 'missed-shot'         then 'shooting_player_id'
         when 'failed-shot-attempt' then 'shooting_player_id'
-        when 'blocked-shot'        then 'shooting_player_id'
+        when 'blocked-shot'        then 'blocking_player_id'
         when 'faceoff'             then 'winning_player_id'
         when 'hit'                 then 'hitting_player_id'
         when 'giveaway'            then 'player_id'
