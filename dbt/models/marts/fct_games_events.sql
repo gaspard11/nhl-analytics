@@ -2,12 +2,16 @@
 
 with base as (
   select
-    pbp.*,
+    pbp.* exclude (fetched_at),
     lpad(cast(pbp.situation_code as varchar), 4, '0') as sc,
     games.home_team_id,
-    games.away_team_id
+    games.away_team_id,
+    greatest(pbp.fetched_at, games.fetched_at) as fetched_at
   from {{ ref('stg_nhl_api__games') }} games
   join {{ ref('stg_nhl_api__pbp') }} pbp on games.game_id = pbp.game_id
+  {% if is_incremental() %}
+  where greatest(pbp.fetched_at, games.fetched_at) > (select max(fetched_at) from {{ this }})
+  {% endif %}
 ),
 
 sides as (
