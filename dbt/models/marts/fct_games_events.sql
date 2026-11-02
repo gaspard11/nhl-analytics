@@ -28,6 +28,7 @@ sides as (
 select
     game_id,
     event_id,
+    sort_order,
     team_id,
     situation_code,
     event_type,
