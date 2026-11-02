@@ -14,6 +14,7 @@ with latest_payload as (
 select
     latest_payload.raw_payload:id::int          as game_id,
     p.value:eventId::int                        as event_id,
+    p.value:sortOrder::int                      as sort_order,
     p.value:details:eventOwnerTeamId::int       as team_id,
     p.value:situationCode::string               as situation_code,
     p.value:typeDescKey::string                 as event_type,
