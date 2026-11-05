@@ -6,12 +6,22 @@
     )
 }}
 
-with base as (
+with events as (
 
     select pbp.*
     from {{ ref('fct_games_events') }} as pbp
     {% if is_incremental() %}
     where pbp.fetched_at > (select max(fetched_at) from {{ this }})
+    {% endif %}
+
+),
+
+rosters as (
+
+    select r.*
+    from {{ ref('fct_game_rosters') }} as r
+    {% if is_incremental() %}
+    where r.fetched_at > (select max(fetched_at) from {{ this }})
     {% endif %}
 
 ),
@@ -22,7 +32,7 @@ games as (
     select
         game_id,
         max(fetched_at) as fetched_at
-    from base
+    from events
     group by game_id
 
 ),
@@ -47,7 +57,7 @@ pp_goals as (
         game_id,
         team_id,
         count(event_id) as pp_goals
-    from base
+    from events
     where event_type = 'goal'
       and situation = 'PP'
     group by game_id, team_id
@@ -65,21 +75,31 @@ pp_rate as (
         on ppo.game_id = ppg.game_id
        and ppo.team_id = ppg.team_id
 
+),
+
+blocked_shots as (
+    select 
+        r.game_id,
+        r.team_id,
+        count(event_id) as blocked_shots,
+        max(greatest(e.fetched_at, r.fetched_at)) as fetched_at
+    from events e
+    join rosters r on e.game_id = r.game_id and player_1_id = r.player_id
+    where event_type = 'blocked-shot' and e.team_id <> r.team_id
+    group by r.game_id, r.team_id
 )
 
 select
     game_id,
     team_id,
-    event_type as stat,
-    count(event_id) as count_events,
+    UPPER(LEFT(event_type, 1)) || LOWER(SUBSTR(event_type, 2)) as stat_name,
+    count(event_id) as stat_value,
     max(fetched_at) as fetched_at
-from base
+from events
 where event_type in (
     'takeaway',
     'giveaway',
     'hit',
-    'shot-on-goal',
-    'blocked-shot',
     'faceoff'
 )
 group by game_id, team_id, event_type
@@ -89,10 +109,25 @@ union all
 select
     game_id,
     team_id,
-    'penalty minutes' as stat,
-    sum(details:duration::int) as count_events,
+    'Shot On Goal' as stat_name,
+    count(event_id) as stat_value,
     max(fetched_at) as fetched_at
-from base
+from events
+where event_type in (
+    'goal',
+    'shot-on-goal'
+)
+group by game_id, team_id
+
+union all
+
+select
+    game_id,
+    team_id,
+    'Penalty Minutes' as stat_name,
+    sum(details:duration::int) as stat_value,
+    max(fetched_at) as fetched_at
+from events
 where event_type = 'penalty'
 group by game_id, team_id
 
@@ -101,8 +136,8 @@ union all
 select
     r.game_id,
     r.team_id,
-    'pp_rate' as stat,
-    r.pp_rate as count_events,
+    'Power Play %' as stat_name,
+    r.pp_rate as stat_value,
     g.fetched_at
 from pp_rate as r
 inner join games as g
@@ -113,8 +148,8 @@ union all
 select
     r.game_id,
     r.team_id,
-    'pp_goals' as stat,
-    r.pp_goals as count_events,
+    'Power Play Goals' as stat_name,
+    r.pp_goals as stat_value,
     g.fetched_at
 from pp_goals as r
 inner join games as g
@@ -126,9 +161,20 @@ union all
 select
     r.game_id,
     r.team_id,
-    'pp_opp' as stat,
-    r.pp_opportunities as count_events,
+    'Power Play Opportunities' as stat_name,
+    r.pp_opportunities as stat_value,
     g.fetched_at
 from pp_opp as r
 inner join games as g
     on g.game_id = r.game_id
+
+union all 
+
+select 
+    game_id,
+    team_id,
+    'Blocked Shots' as stat,
+    blocked_shots as stat_value,
+    fetched_at
+from blocked_shots
+
