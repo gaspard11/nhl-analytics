@@ -92,7 +92,7 @@ blocked_shots as (
 select
     game_id,
     team_id,
-    UPPER(LEFT(event_type, 1)) || LOWER(SUBSTR(event_type, 2)) as stat_name,
+    CONCAT(UPPER(LEFT(event_type, 1)) || LOWER(SUBSTR(event_type, 2)),'s') as stat_name,
     count(event_id) as stat_value,
     max(fetched_at) as fetched_at
 from events
@@ -109,7 +109,7 @@ union all
 select
     game_id,
     team_id,
-    'Shot On Goal' as stat_name,
+    'Shots On Goal' as stat_name,
     count(event_id) as stat_value,
     max(fetched_at) as fetched_at
 from events
@@ -173,7 +173,7 @@ union all
 select 
     game_id,
     team_id,
-    'Blocked Shots' as stat,
+    'Blocked Shots' as stat_name,
     blocked_shots as stat_value,
     fetched_at
 from blocked_shots
