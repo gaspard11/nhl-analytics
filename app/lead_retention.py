@@ -27,7 +27,7 @@ WHOLE_GAME = "Whole game"
 AFTER_2_PERIODS = "After 2 periods"
 
 WHOLE_GAME_TEXT = """
-- **% lead** = time leading / (time leading + time trailing). Tied time and overtime don't count.
+- **% of the non-tied time in the lead** = time leading / (time leading + time trailing). Tied time and overtime don't count.
 - **% wins** includes overtime and shootout wins.
 - **Dashed lines** (50%): to the right, a team leads more than it trails. Above, it wins more than it loses.
 - **Red line**: a team wins as often as it leads. Above, it wins more than its time in the lead suggests. Below, less.
