@@ -87,6 +87,17 @@ blocked_shots as (
     join rosters r on e.game_id = r.game_id and player_1_id = r.player_id
     where event_type = 'blocked-shot' and e.team_id <> r.team_id
     group by r.game_id, r.team_id
+),
+
+leading_duration as (
+    select
+        game_id,
+        leading_team_id as team_id,
+        sum(duration_s) as leading_duration,
+        max(fetched_at) as fetched_at
+    from {{ ref('fct_games_leading_segments') }}
+    where leading_team_id > 0
+    group by game_id, leading_team_id
 )
 
 select
@@ -177,4 +188,14 @@ select
     blocked_shots as stat_value,
     fetched_at
 from blocked_shots
+
+union all 
+
+select
+    game_id,
+    team_id,
+    'Leading time',
+    leading_duration,
+    fetched_at
+from leading_duration
 
