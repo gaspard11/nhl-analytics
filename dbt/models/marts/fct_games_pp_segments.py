@@ -1,5 +1,5 @@
 """
-fct_games_pp: every game cut into segments of constant strength (5v5, 5v4, 4v4, 3v3...),
+fct_games_pp_segments: every game cut into segments of constant strength (5v5, 5v4, 4v4, 3v3...),
 one row per segment, with the official NHL power-play opportunities.
 
 The penalty box is replayed penalty by penalty with simulate_game (this file is the reference
@@ -441,10 +441,11 @@ def model(dbt, session):
     new_pp = segments["pp_team_id"].notna() & (segments["pp_team_id"] != previous_pp_team)
     segments["power_play_number"] = new_pp.groupby(segments["game_id"]).cumsum().where(segments["pp_team_id"].notna())
 
+    segments = segments.rename(columns={"situation": "strength_situation"})
     segments = segments[[
         "game_id", "segment_number", "power_play_number", "pp_opportunities",
         "home_team_id", "away_team_id", "pp_team_id", "pk_team_id",
-        "situation", "strength", "skaters_home", "skaters_away",
+        "strength_situation", "strength", "skaters_home", "skaters_away",
         "start_period", "start_time_in_period", "end_period", "end_time_in_period",
         "starting_time_seconds", "ending_time_seconds", "duration_seconds",
         "fetched_at",

@@ -72,6 +72,18 @@ all_events_cleaned as (
     select
         *
     from last_event_per_game
+    union all
+    -- A game without a goal (0-0 until a shootout) has no last goal to end its only stretch
+    select
+        game_id,
+        0,
+        0,
+        'tied' as leading_team_after,
+        0 as leading_team_id_after,
+        3600,
+        fetched_at
+    from games
+    where game_id not in (select game_id from goals_cleaned)
 ),
 
 ordered as (

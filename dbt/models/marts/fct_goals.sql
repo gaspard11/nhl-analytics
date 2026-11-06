@@ -40,6 +40,17 @@ sides as (
         substr(code, iff(is_home, 1, 4), 1)::int    as opp_goalie
     from coded
 
+),
+
+-- A pulled goalie gives an extra skater, not a power play: it is taken off both sides before comparing
+effective as (
+
+    select
+        *,
+        own_skaters - (1 - own_goalie)              as own_effective,
+        opp_skaters - (1 - opp_goalie)              as opp_effective
+    from sides
+
 )
 
 select
@@ -56,17 +67,22 @@ select
     time_in_period,
     time_remaining_in_period,
     fetched_at,
-    -- A pulled goalie gives an extra skater, not a power play: it is taken off before comparing
+    -- Who has more skaters. A goal into the empty net of a penalised team (5 on 5 in the code) is PP
     case
-        when code in ('0101', '1010')                       then 'PS'
-        when opp_goalie = 0                                 then 'EN'
-        when own_skaters - (1 - own_goalie) > opp_skaters   then 'PPG'
-        when own_skaters - (1 - own_goalie) < opp_skaters   then 'SHG'
-        when own_goalie = 0                                 then 'EA'
+        when code in ('0101', '1010')       then 'PS'
+        when own_effective > opp_effective  then 'PP'
+        when own_effective < opp_effective  then 'SH'
         else 'EV'
-    end as goal_type,
+    end as strength_situation,
+    -- Which net is empty. Penalty shots first: their code has a 0 where a goalie is usually counted
+    case
+        when code in ('0101', '1010')       then 'NORMAL'
+        when opp_goalie = 0                 then 'EN'
+        when own_goalie = 0                 then 'EA'
+        else 'NORMAL'
+    end as net_situation,
     case
         when code in ('0101', '1010') then 'Penalty shot'
         else own_skaters || ' on ' || opp_skaters
     end as strength
-from sides
+from effective

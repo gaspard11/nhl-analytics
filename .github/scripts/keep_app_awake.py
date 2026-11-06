@@ -16,7 +16,7 @@ from playwright.sync_api import sync_playwright
 
 APP_URL = os.environ["APP_URL"].rstrip("/")
 # URL paths of the pages, from their file names in app/app.py ("" is the default page, Games)
-PAGES = ["", "standings", "evolution", "player_stats"]
+PAGES = ["", "standings", "evolution", "player_stats", "lead_retention"]
 
 WAKE_UP_BUTTON = "Yes, get this app back up!"
 APP_IFRAME = 'iframe[title="streamlitApp"]'  # on *.streamlit.app the app runs inside this iframe

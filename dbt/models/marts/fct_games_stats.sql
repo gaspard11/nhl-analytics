@@ -54,13 +54,14 @@ pp_opp as (
 pp_goals as (
 
     select
-        game_id,
-        team_id,
-        count(event_id) as pp_goals
-    from events
-    where event_type = 'goal'
-      and situation = 'PP'
-    group by game_id, team_id
+        go.game_id,
+        go.team_id,
+        count(go.event_id) as pp_goals
+    from {{ ref('fct_goals') }} as go
+    inner join games as g
+        on g.game_id = go.game_id     -- only the games of this batch
+    where go.strength_situation = 'PP'
+    group by go.game_id, go.team_id
 
 ),
 
@@ -91,13 +92,15 @@ blocked_shots as (
 
 leading_duration as (
     select
-        game_id,
-        leading_team_id as team_id,
-        sum(duration_s) as leading_duration,
-        max(fetched_at) as fetched_at
-    from {{ ref('fct_games_leading_segments') }}
-    where leading_team_id > 0
-    group by game_id, leading_team_id
+        l.game_id,
+        l.leading_team_id as team_id,
+        sum(l.duration_s) as leading_duration,
+        max(g.fetched_at) as fetched_at
+    from {{ ref('fct_games_leading_segments') }} as l
+    inner join games as g
+        on g.game_id = l.game_id      -- only the games of this batch
+    where l.leading_team_id > 0
+    group by l.game_id, l.leading_team_id
 )
 
 select
