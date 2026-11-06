@@ -5,6 +5,8 @@ This is the transformation part of the project. It takes the raw NHL API data lo
 * the league standings for every day of the season, with all the NHL tie breakers,
 * the player rankings (goals, assists, points) for every day,
 * the games and goals, with the situation of each goal (power play, short handed, empty net, penalty shot),
+* every play of every game, and the rosters,
+* each team's stats for each game, including the power play opportunities, worked out by replaying the penalties of the game,
 * each team's travel from arena to arena during the season.
 
 The raw data is loaded into `NHL_RAW.RAW` by the Airflow DAG `nhl_raw_pipeline` (see the [main README](../README.md)). Once the load is done, the DAG triggers the dbt Cloud production job, which builds the tables in `NHL_ANALYTICS.MARTS` that the Streamlit app reads. The project runs in dbt Cloud.
@@ -51,6 +53,12 @@ NHL_RAW.RAW (append only, every load is kept)
                                                                                  └──► dim_players (also uses stg_nhl_api__games)
 
 seed nhl_teams ──► dim_teams
+
+fct_games_events ──┬──► fct_games_pp_segments (Python, also uses fct_games) ──┐
+                   │                                                          │
+                   └──────────────────────────────────────────────────────────┤
+fct_game_rosters ─────────────────────────────────────────────────────────────┼──► fct_games_stats
+fct_goals ─────────► fct_games_leading_segments (also uses fct_games) ────────┘
 ```
 
 ## Models
@@ -86,7 +94,10 @@ The models reading a raw table parse the JSON and keep only the latest load of e
 | `fct_games` | game | incremental (merge on `game_id`) |
 | `fct_goals` | goal | incremental (delete+insert on `game_id`) |
 | `fct_games_events` | play | incremental (delete+insert on `game_id`) |
-| `fct_game_rosters` | player and game | incremental (`unique_key` `game_id`) |
+| `fct_game_rosters` | player and game | incremental (delete+insert on `game_id`) |
+| `fct_games_pp_segments` | segment of constant strength | incremental (delete+insert on `game_id`), Python model |
+| `fct_games_leading_segments` | stretch of a game with the same team leading, or tied | incremental (delete+insert on `game_id`) |
+| `fct_games_stats` | game, team and stat | incremental (delete+insert on `game_id`) |
 | `fct_team_travel` | team and game | table |
 | `dim_players` | player | incremental (merge on `player_id`) |
 | `dim_teams` | team | table |
@@ -96,9 +107,11 @@ The models reading a raw table parse the JSON and keep only the latest load of e
 | Name | Type | What it does |
 |---|---|---|
 | `nhl_teams` | seed | The 32 teams, with conference, division, logo and home arena (name and coordinates). `dim_teams` is built from it |
-| `nhl_players_team_snapshot` | snapshot (check strategy on `team_id`, schema `SNAPSHOTS`) | History of each player's team. `dim_players` only keeps the current team, so the snapshot records a new version whenever it changes, for example after a trade |
+| `nhl_players_team_snapshot` | snapshot (timestamp strategy on `team_since`, schema `SNAPSHOTS`) | History of each player's team. `dim_players` only keeps the current team, so the snapshot records a new version whenever it changes, for example after a trade |
 
-The snapshot only sees a change when it runs, and `dim_players` only updates a player's team when they record a point for their new team. So `dbt_valid_from` is the date the move was noticed, not the date of the trade.
+The snapshot is built from `fct_game_rosters` and `fct_games`. For each player it takes the team of their most recent game, and `team_since`: the date of their first game with that team since their last game with another one. A new version is recorded when `team_since` changes, and `dbt_valid_from` is that date, so it is the date of the player's first game with the new team, not the date of the run that noticed it.
+
+The snapshot only looks at games up to its `as_of` var (today by default). That is how its history was rebuilt: [`scripts/replay_player_team_snapshot.py`](../scripts/replay_player_team_snapshot.py) runs `dbt snapshot --vars '{as_of: ...}'` once per game date, oldest first, in a one-off dbt Cloud production job.
 
 ### Goal situations (`fct_goals`)
 
@@ -116,6 +129,63 @@ The play by play gives a 4 digit `situation_code` for every goal: away goalie in
   * `EV` (even strength) otherwise.
 
 A team that pulls its own goalie for an extra attacker is not on a power play, so that extra skater is left out when comparing the two sides. The app reads these two columns directly to label each goal.
+
+### Play by play events (`fct_games_events`)
+
+Every play of the play by play (shots, hits, faceoffs, penalties, goals, stoppages, shootout attempts…), with the players involved (`player_1_id` to `player_3_id`, and `player_*_desc` saying what each one did) and the puck coordinates. Unlike `fct_goals`, the situation is read from the game's side, not from one team's, since most plays have no scoring team:
+
+* `situation`:
+  * `PS` (penalty shot) when the code is `0101` or `1010`,
+  * `EA` (extra attacker) when either team had pulled its goalie,
+  * `PP` (power play) when one team had more skaters,
+  * `EV` (even strength) otherwise.
+* `strength_adv_team`: skaters on each side, the team with more skaters first, like `5 on 4`, or `Penalty shot`.
+* `man_adv_team_id`: the team with more skaters, null when the sides are even.
+
+A game is reloaded when either its play by play or its game row has a newer load, so `fetched_at` is the latest of the two.
+
+### Power play segments (`fct_games_pp_segments`)
+
+The play by play gives the penalties and the goals, but it has no event for the end of a power play, and the official number of opportunities isn't a simple count of penalties. So this model replays each game and cuts it into segments of constant strength (5v5, 5v4, 4v4, 3v3...), one row per segment. It is a Python model because each event depends on who is in the penalty box at that moment, which is a loop over the game rather than a query. It runs inside Snowflake, and each incremental run replays in full the games with newly loaded events, since the simulation needs the whole game.
+
+The simulator (`simulate_game`) works through the goals and penalties of a game in order, with these rules:
+
+* A team has at most 2 players in the box at once. Other penalties wait until a place is free.
+* A power play goal ends the earliest running minor of the team short handed. Majors keep going.
+* One minor each, with no other penalty running, gives 4 on 4 and no power play. Otherwise, equal penalties on both sides cancel out and are served with substitutes, so the strength doesn't change. The captain's choice is applied by cancelling first the penalties of the players with the fewest penalties.
+* A double minor is two minors, and the penalties of one player are served one after the other, majors first.
+* From the last 5 minutes of the third period, when a major is left against a minor or a double minor after cancelling, only the difference is served.
+* Overtime in the regular season is 3 on 3, and a penalty gives the other team one more skater instead of taking one away from the penalised team. Shootouts are left out.
+* Misconducts, game misconducts and penalty shots don't change the strength, so they are ignored. So are pulled goalies: a 6 on 5 isn't a power play.
+
+Power plays are counted in two ways:
+
+* `power_play_number`: consecutive uneven segments with the same team on the power play are one stretch. `5v4 → 5v3 → 5v4` is one, `5v4 → 4v4 → 5v4` is two.
+* `pp_opportunities`: the official count. Each penalty served that gave the other team a man advantage counts once, on the first power play segment it overlaps. Coincidental and cancelled penalties don't count. A power play goal during a major that keeps going is a new opportunity.
+
+`strength` is always written from the home side (`4v5` means the away team is on the power play). `pp_team_id` and `pk_team_id` are null at even strength.
+
+### Game stats (`fct_games_stats`)
+
+One row per game, team and stat, so a new stat is one more block in the `union all`, not a new column.
+
+| `stat_name` | How it's computed |
+|---|---|
+| `Shots On Goal` | `goal` and `shot-on-goal` events of the team |
+| `Faceoffs` | `faceoff` events of the team, that is the faceoffs it won |
+| `Hits`, `Takeaways`, `Giveaways` | Events of that type for the team |
+| `Blocked Shots` | Shots blocked by the team's players. The event belongs to the shooting team, so the blocker's team comes from `fct_game_rosters` |
+| `Penalty Minutes` | Sum of the `duration` of the team's penalties |
+| `Power Play Goals` | The team's goals with `situation = 'PP'` in `fct_games_events` |
+| `Power Play Opportunities` | Sum of `pp_opportunities` in `fct_games_pp_segments` |
+| `Power Play %` | Goals over opportunities, as a rate between 0 and 1 |
+| `Leading time` | Seconds the team spent in the lead, from `fct_games_leading_segments`. Used by the Lead retention page, not shown on the game page |
+
+A team with no row for a stat simply had none of it, and the app shows 0.
+
+### Leading segments (`fct_games_leading_segments`)
+
+Cuts each game by the score, from `fct_goals`: one row per stretch with the same team leading, or tied. Two goals in a row by the leading team stay in one stretch. `leading_team_id` is 0 when the score is tied, and times are in seconds since the start of the game. Shootout goals aren't in `fct_goals`, so a game going to a shootout ends tied. Summed per team, this gives the `Leading time` stat of `fct_games_stats`, which the Lead retention page of the app compares with the time trailing.
 
 ### Team travel (`fct_team_travel`)
 
@@ -173,8 +243,12 @@ They are declared in the `_*__models.yml` files, next to the descriptions.
 | | `season`, `game_date` | not null |
 | | `home_team_id`, `away_team_id` | not null, exists in the `nhl_teams` seed |
 | | `last_period_type` | one of `REG`, `OT`, `SO` |
+| `stg_nhl_api__pbp` | `game_id` + `event_id` | unique together |
+| | `game_id`, `event_id` | not null |
 | `stg_nhl_api__goals` | `game_id` + `event_id` | unique together |
 | | `game_id`, `event_id`, `scoring_player_id` | not null |
+| `stg_nhl_api__game_rosters` | `game_id` + `player_id` | unique together |
+| | `game_id`, `player_id`, `team_id` | not null |
 | `int_team_game_results` | `game_id` + `team_id` | unique together |
 | | `points` | one of 0, 1, 2 |
 | `int_league_ranking_pre_tie_breaker` | `season` + `ranking_date` + `team_id` | unique together |
@@ -190,6 +264,13 @@ They are declared in the `_*__models.yml` files, next to the descriptions.
 | `fct_games` | `game_id` | unique, not null |
 | `fct_goals` | `game_id` + `event_id` | unique together |
 | | `goal_type` | not null, one of `PS`, `EN`, `PPG`, `SHG`, `EA`, `EV` |
+| `fct_games_events` | `game_id` + `event_id` | unique together |
+| | `situation` | not null, one of `PS`, `EA`, `PP`, `EV` |
+| `fct_game_rosters` | `game_id` + `player_id` | unique together |
+| | `team_id` | not null, exists in `dim_teams` |
+| `fct_games_pp_segments` | `game_id` + `segment_number` | unique together |
+| | `game_id` | not null, exists in `fct_games` |
+| | `duration_seconds` | at least 1 |
 | `fct_team_travel` | `game_id` + `team_id` | unique together |
 | | `team_id` | not null, exists in `dim_teams` |
 | | `arena_name` | not null |
@@ -221,3 +302,5 @@ They are in `tests/`. Each one returns the rows that break its rule, so a passin
 * Regular season only: the DAG requests `gameType = 2`, and the `REG` / `OT` / `SO` logic assumes a single overtime period.
 * Teams come from the `nhl_teams` seed, with the current 32 franchises and their current arenas. An older season with other teams, or a game played at a neutral site (like the Global Series games in Europe), would need more than one arena per team.
 * Shootouts: the final score gives the shootout winner one extra goal, as the NHL does. Shootout goals are left out of the play by play and of player stats.
+* Power play simulator: it was compared with the NHL's situation codes on a sample of games, not on whole seasons, so a rare combination of penalties could still give a wrong segment.
+* Power play goals: `Power Play Goals` in `fct_games_stats` comes from the situation code, where a pulled goalie takes priority. A goal scored at 6 on 4 is `EA`, so it isn't counted as a power play goal.

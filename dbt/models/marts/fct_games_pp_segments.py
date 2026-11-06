@@ -1,5 +1,5 @@
 """
-fct_games_pp: every game cut into segments of constant strength (5v5, 5v4, 4v4, 3v3...),
+fct_games_pp_segments: every game cut into segments of constant strength (5v5, 5v4, 4v4, 3v3...),
 one row per segment, with the official NHL power-play opportunities.
 
 The penalty box is replayed penalty by penalty with simulate_game (this file is the reference

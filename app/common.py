@@ -9,8 +9,8 @@ from cryptography.hazmat.primitives import serialization
 from snowflake.connector.errors import ProgrammingError
 
 
-# Main colour of each team's logo: evolution lines, game timeline, points chart
-TEAM_COLORS = {
+# Main colour of each team's logo: evolution lines, game timeline, game charts
+TEAM_COLORS_MAIN = {
     "Anaheim Ducks": "#F47A38",
     "Boston Bruins": "#FFB81C",
     "Buffalo Sabres": "#003087",
@@ -44,6 +44,70 @@ TEAM_COLORS = {
     "Washington Capitals": "#C8102E",
     "Winnipeg Jets": "#041E42",
 }
+
+# Colour of the away team when it's too close to the home team's main colour (see game_colors).
+# From each logo, except Detroit, Tampa Bay and Toronto: theirs only have white, which wouldn't show
+# on the page, so they use a silver
+TEAM_COLORS_SEC = {
+    "Anaheim Ducks": "#89734C",
+    "Boston Bruins": "#010101",
+    "Buffalo Sabres": "#FFB81C",
+    "Calgary Flames": "#F1BE48",
+    "Carolina Hurricanes": "#A2AAAD",
+    "Chicago Blackhawks": "#D9A510",
+    "Colorado Avalanche": "#236192",
+    "Columbus Blue Jackets": "#C8102E",
+    "Dallas Stars": "#A2AAAD",
+    "Detroit Red Wings": "#A2AAAD",
+    "Edmonton Oilers": "#00205B",
+    "Florida Panthers": "#041E42",
+    "Los Angeles Kings": "#A2AAAD",
+    "Minnesota Wild": "#A6192E",
+    "Montréal Canadiens": "#001E62",
+    "Nashville Predators": "#041E42",
+    "New Jersey Devils": "#010101",
+    "New York Islanders": "#FC4C02",
+    "New York Rangers": "#C8102E",
+    "Ottawa Senators": "#B9975B",
+    "Philadelphia Flyers": "#010101",
+    "Pittsburgh Penguins": "#010101",
+    "San Jose Sharks": "#E57200",
+    "Seattle Kraken": "#041C2C",
+    "St. Louis Blues": "#FFB81C",
+    "Tampa Bay Lightning": "#A2AAAD",
+    "Toronto Maple Leafs": "#A2AAAD",
+    "Utah Mammoth": "#010101",
+    "Vancouver Canucks": "#97999B",
+    "Vegas Golden Knights": "#333F48",
+    "Washington Capitals": "#041E42",
+    "Winnipeg Jets": "#A6192E",
+}
+
+TIED_COLOR = "#e6e6e6"  # timeline bar while the score is tied, and any team without a colour
+CLOSE_COLORS = 130  # under this color_distance, two teams can't be told apart on a chart
+
+
+def color_distance(color_1, color_2):
+    """How different two "#RRGGBB" colours look: 0 when identical, 765 from black to white.
+    This is the "redmean" formula, an RGB distance weighted to be closer to what the eye sees."""
+    red_1, green_1, blue_1 = (int(color_1[i:i + 2], 16) for i in (1, 3, 5))
+    red_2, green_2, blue_2 = (int(color_2[i:i + 2], 16) for i in (1, 3, 5))
+    mean_red = (red_1 + red_2) / 2
+    return (
+        (2 + mean_red / 256) * (red_1 - red_2) ** 2
+        + 4 * (green_1 - green_2) ** 2
+        + (2 + (255 - mean_red) / 256) * (blue_1 - blue_2) ** 2
+    ) ** 0.5
+
+
+def game_colors(home_team, away_team):
+    """(home colour, away colour) for the charts of one game: their main colours, except that the
+    away team takes its secondary colour when the two are too close."""
+    home_color = TEAM_COLORS_MAIN.get(home_team, TIED_COLOR)
+    away_color = TEAM_COLORS_MAIN.get(away_team, TIED_COLOR)
+    if color_distance(home_color, away_color) < CLOSE_COLORS:
+        away_color = TEAM_COLORS_SEC.get(away_team, away_color)
+    return home_color, away_color
 
 
 def display_season(season):
@@ -93,15 +157,21 @@ def data_version():
     return (datetime.now(timezone.utc) - timedelta(hours=REFRESH_HOUR_UTC)).date()
 
 
-@st.cache_data(max_entries=10, show_spinner="Loading data...")
-def _cached_query(sql, version):
-    """The cache is keyed on the arguments: `version` is unused in the body, it only makes a new
-    day a new cache entry. A cursor is used rather than conn.query, which has its own ttl cache."""
+def fetch_query(sql):
+    """Query result, straight from Snowflake: the caller caches it. A cursor is used rather than
+    conn.query, which has its own ttl cache."""
     try:
         return get_connection().cursor().execute(sql).fetch_pandas_all()
     except ProgrammingError:
         get_connection().reset()
         return get_connection().cursor().execute(sql).fetch_pandas_all()
+
+
+@st.cache_data(max_entries=10, show_spinner="Loading data...")
+def _cached_query(sql, version):
+    """The cache is keyed on the arguments: `version` is unused in the body, it only makes a new
+    day a new cache entry."""
+    return fetch_query(sql)
 
 
 def run_query(sql):

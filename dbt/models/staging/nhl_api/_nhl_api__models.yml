@@ -54,3 +54,73 @@ models:
           - not_null
       - name: situation_code
         description: "{{ doc('situation_code') }}"
+
+  - name: stg_nhl_api__pbp
+    description: >
+      One row per play (event) of the play-by-play, shootout attempts included, from the latest
+      play-by-play load of each game.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['game_id', 'event_id']
+    columns:
+      - name: game_id
+        description: "{{ doc('game_id') }}"
+        data_tests:
+          - not_null
+      - name: event_id
+        description: Id of the play within the game's play-by-play.
+        data_tests:
+          - not_null
+      - name: team_id
+        description: Team that owns the event (e.g. the shooting or penalized team). Null for plays like stoppages.
+      - name: situation_code
+        description: "{{ doc('situation_code') }}"
+      - name: event_type
+        description: Type of play from the NHL API, e.g. `goal`, `shot-on-goal`, `hit`, `faceoff`, `penalty`.
+      - name: player_1_id
+        description: Main player of the play (scorer, shooter, blocker, faceoff winner, hitter, penalized player...).
+      - name: player_1_desc
+        description: What player_1_id did, e.g. `scoring_player_id`, `blocking_player_id`.
+      - name: player_2_id
+        description: Second player of the play (first assist, shooter of a blocked shot, faceoff loser, player hit, player who drew the penalty).
+      - name: player_2_desc
+        description: What player_2_id did.
+      - name: player_3_id
+        description: Third player of the play (second assist, player serving the penalty).
+      - name: player_3_desc
+        description: What player_3_id did.
+      - name: details
+        description: The full `details` object of the play, as JSON, for the fields not parsed into columns.
+      - name: fetched_at
+        description: "{{ doc('fetched_at') }}"
+
+  - name: stg_nhl_api__game_rosters
+    description: >
+      One row per player per game, for every player who dressed, from the `rosterSpots` of the latest
+      play-by-play load of each game.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['game_id', 'player_id']
+    columns:
+      - name: game_id
+        description: "{{ doc('game_id') }}"
+        data_tests:
+          - not_null
+      - name: player_id
+        description: "{{ doc('player_id') }}"
+        data_tests:
+          - not_null
+      - name: team_id
+        description: Team the player dressed for in this game. Joins to `dim_teams.team_id`.
+        data_tests:
+          - not_null
+      - name: position
+        description: Position code from the NHL API. C = center, L = left wing, R = right wing, D = defense, G = goalie.
+      - name: sweater_number
+        description: Player's jersey number in this game.
+      - name: headshot_url
+        description: URL of the player's headshot image on the NHL site.
+      - name: fetched_at
+        description: "{{ doc('fetched_at') }}"

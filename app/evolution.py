@@ -3,7 +3,7 @@
 import altair as alt
 import streamlit as st
 
-from common import TEAM_COLORS, date_picker, group_picker, load_rankings, season_picker, view_picker
+from common import TEAM_COLORS_MAIN, date_picker, group_picker, load_rankings, season_picker, view_picker
 
 
 # Team pills (logo + abbreviation): Streamlit sizes a pill for its text only, so the logo pushed the
@@ -112,7 +112,7 @@ def standing_evolution(teams, x_max, y_domain, highlighted=()):
         detail="TEAM:N",  # one line per team even when two teams share a colour
         color=alt.Color(
             "TEAM:N",
-            scale=alt.Scale(domain=list(TEAM_COLORS), range=list(TEAM_COLORS.values())),
+            scale=alt.Scale(domain=list(TEAM_COLORS_MAIN), range=list(TEAM_COLORS_MAIN.values())),
             legend=None,  # the logos identify the teams
         ),
     )
