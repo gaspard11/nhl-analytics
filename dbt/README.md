@@ -58,7 +58,8 @@ fct_games_events ──┬──► fct_games_pp_segments (Python, also uses fct
                    │                                                          │
                    └──────────────────────────────────────────────────────────┤
 fct_game_rosters ─────────────────────────────────────────────────────────────┼──► fct_games_stats
-fct_goals ─────────► fct_games_leading_segments (also uses fct_games) ────────┘
+fct_goals ─────────┬──► fct_games_leading_segments (also uses fct_games) ─────┤
+                   └──────────────────────────────────────────────────────────┘
 ```
 
 ## Models
@@ -117,30 +118,41 @@ The snapshot only looks at games up to its `as_of` var (today by default). That 
 
 The play by play gives a 4 digit `situation_code` for every goal: away goalie in net (1 or 0), away skaters, home skaters, home goalie in net. `1541` means the away team had 5 skaters and the home team 4.
 
-`fct_goals` reads that code from the scoring team's side and adds two columns:
+`fct_goals` reads that code from the scoring team's side and adds three columns:
 
 * `strength`: skaters on each side, scoring team first, like `5 on 4`, or `Penalty shot`.
-* `goal_type`:
+* `strength_situation`, who had more skaters:
   * `PS` (penalty shot) when the code is `0101` or `1010`: one shooter alone against the goalie,
-  * `EN` (empty net) when the other team had pulled its goalie,
-  * `PPG` (power play) when the scoring team had more skaters,
-  * `SHG` (short handed) when it had fewer,
-  * `EA` (extra attacker) when the scoring team had pulled its goalie and the sides were otherwise even, like 6 on 5,
+  * `PP` (power play) when the scoring team had more skaters,
+  * `SH` (short handed) when it had fewer,
   * `EV` (even strength) otherwise.
+* `net_situation`, which net was empty:
+  * `EN` (empty net) when the other team had pulled its goalie,
+  * `EA` (extra attacker) when the scoring team had pulled its goalie,
+  * `NORMAL` when both goalies were in, and on penalty shots, whose code has a 0 where a goalie is usually counted.
 
-A team that pulls its own goalie for an extra attacker is not on a power play, so that extra skater is left out when comparing the two sides. The app reads these two columns directly to label each goal.
+The two situations are independent, so a goal can be both, like `PP` + `EN`. A pulled goalie doesn't change who is on the power play, so that extra skater is left out on both sides when comparing them:
+
+| Goal | `strength` | `strength_situation` | `net_situation` |
+|---|---|---|---|
+| Power play | `5 on 4` | `PP` | `NORMAL` |
+| Power play with its own goalie pulled | `6 on 4` | `PP` | `EA` |
+| Extra attacker | `6 on 5` | `EV` | `EA` |
+| Empty net | `5 on 6` | `EV` | `EN` |
+| Into the empty net of a penalised team | `5 on 5` | `PP` | `EN` |
+| Short handed into an empty net | `4 on 6` | `SH` | `EN` |
+
+The app reads these columns directly to label each goal.
 
 ### Play by play events (`fct_games_events`)
 
 Every play of the play by play (shots, hits, faceoffs, penalties, goals, stoppages, shootout attempts…), with the players involved (`player_1_id` to `player_3_id`, and `player_*_desc` saying what each one did) and the puck coordinates. Unlike `fct_goals`, the situation is read from the game's side, not from one team's, since most plays have no scoring team:
 
-* `situation`:
-  * `PS` (penalty shot) when the code is `0101` or `1010`,
-  * `EA` (extra attacker) when either team had pulled its goalie,
-  * `PP` (power play) when one team had more skaters,
-  * `EV` (even strength) otherwise.
+* `strength_situation`: `PS` (penalty shot), `PP` (power play) when one team had more skaters, `EV` (even strength) otherwise. The extra skater of a pulled goalie is left out on both sides, as in `fct_goals`.
+* `net_situation`: `PULLED` when a team had pulled its goalie, `NORMAL` otherwise.
+* `empty_net_team_id`: the team that had pulled its goalie, null otherwise. Comparing it with the team of the play gives `EN` or `EA`, as `fct_goals` does.
 * `strength_adv_team`: skaters on each side, the team with more skaters first, like `5 on 4`, or `Penalty shot`.
-* `man_adv_team_id`: the team with more skaters, null when the sides are even.
+* `man_adv_team_id`: the team on the power play, without counting the extra skater of a pulled goalie, null when the sides are even.
 
 A game is reloaded when either its play by play or its game row has a newer load, so `fetched_at` is the latest of the two.
 
@@ -176,7 +188,7 @@ One row per game, team and stat, so a new stat is one more block in the `union a
 | `Hits`, `Takeaways`, `Giveaways` | Events of that type for the team |
 | `Blocked Shots` | Shots blocked by the team's players. The event belongs to the shooting team, so the blocker's team comes from `fct_game_rosters` |
 | `Penalty Minutes` | Sum of the `duration` of the team's penalties |
-| `Power Play Goals` | The team's goals with `situation = 'PP'` in `fct_games_events` |
+| `Power Play Goals` | The team's goals with `strength_situation = 'PP'` in `fct_goals`, so a goal at 6 on 4 or into the empty net of a penalised team counts, and a short handed goal doesn't |
 | `Power Play Opportunities` | Sum of `pp_opportunities` in `fct_games_pp_segments` |
 | `Power Play %` | Goals over opportunities, as a rate between 0 and 1 |
 | `Leading time` | Seconds the team spent in the lead, from `fct_games_leading_segments`. Used by the Lead retention page, not shown on the game page |
@@ -263,9 +275,11 @@ They are declared in the `_*__models.yml` files, next to the descriptions.
 | | `ranking` | not null |
 | `fct_games` | `game_id` | unique, not null |
 | `fct_goals` | `game_id` + `event_id` | unique together |
-| | `goal_type` | not null, one of `PS`, `EN`, `PPG`, `SHG`, `EA`, `EV` |
+| | `strength_situation` | not null, one of `PS`, `PP`, `SH`, `EV` |
+| | `net_situation` | not null, one of `EN`, `EA`, `NORMAL` |
 | `fct_games_events` | `game_id` + `event_id` | unique together |
-| | `situation` | not null, one of `PS`, `EA`, `PP`, `EV` |
+| | `strength_situation` | not null, one of `PS`, `PP`, `EV` |
+| | `net_situation` | not null, one of `PULLED`, `NORMAL` |
 | `fct_game_rosters` | `game_id` + `player_id` | unique together |
 | | `team_id` | not null, exists in `dim_teams` |
 | `fct_games_pp_segments` | `game_id` + `segment_number` | unique together |
@@ -303,4 +317,4 @@ They are in `tests/`. Each one returns the rows that break its rule, so a passin
 * Teams come from the `nhl_teams` seed, with the current 32 franchises and their current arenas. An older season with other teams, or a game played at a neutral site (like the Global Series games in Europe), would need more than one arena per team.
 * Shootouts: the final score gives the shootout winner one extra goal, as the NHL does. Shootout goals are left out of the play by play and of player stats.
 * Power play simulator: it was compared with the NHL's situation codes on a sample of games, not on whole seasons, so a rare combination of penalties could still give a wrong segment.
-* Power play goals: `Power Play Goals` in `fct_games_stats` comes from the situation code, where a pulled goalie takes priority. A goal scored at 6 on 4 is `EA`, so it isn't counted as a power play goal.
+* Strength situation: it only sees the situation code. A goal scored into an empty net just after the goalie left, before the extra skater is on the ice, looks like a penalised team and would be `PP` + `EN`.

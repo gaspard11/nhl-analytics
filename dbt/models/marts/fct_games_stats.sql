@@ -54,13 +54,14 @@ pp_opp as (
 pp_goals as (
 
     select
-        game_id,
-        team_id,
-        count(event_id) as pp_goals
-    from events
-    where event_type = 'goal'
-      and situation = 'PP'
-    group by game_id, team_id
+        go.game_id,
+        go.team_id,
+        count(go.event_id) as pp_goals
+    from {{ ref('fct_goals') }} as go
+    inner join games as g
+        on g.game_id = go.game_id     -- only the games of this batch
+    where go.strength_situation = 'PP'
+    group by go.game_id, go.team_id
 
 ),
 

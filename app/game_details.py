@@ -14,6 +14,15 @@ from common import TIED_COLOR, game_colors
 
 PERIOD_NAMES = {1: "1st", 2: "2nd", 3: "3rd", 4: "OT"}
 
+# strength_situation and net_situation of fct_goals, shared by the goal log and the play-by-play log
+STRENGTH_LABELS = {
+    "PS": "🎯 Penalty shot",
+    "PP": "⚡ Power play",
+    "SH": "🛡️ Short-handed",
+    "EV": "🟰 Even strength",
+}
+NET_LABELS = {"EN": "🥅 Empty net", "EA": "➕ Extra attacker"}
+
 
 # ---------------------------------------------------------------------------
 # Timeline: a bar over the length of the game in the leading team's colour, cut by period,
@@ -48,7 +57,7 @@ def shootout_goal(game, game_length):
     }
 
 
-def timeline_chart(game_goals, has_overtime, overtime_length=300):
+def timeline_chart(game, game_goals, has_overtime, overtime_length=300):
     periods = pd.DataFrame({
         "PERIOD": ["1st", "2nd", "3rd"],
         "START": [0, 1200, 2400],
@@ -58,14 +67,16 @@ def timeline_chart(game_goals, has_overtime, overtime_length=300):
         periods.loc[len(periods)] = ["OT", 3600, 3600 + overtime_length]
     game_length = int(periods["END"].max())
 
-    # One piece of bar between two goals, coloured by the team leading after the first one
-    pieces = pd.DataFrame({
-        "START": [0] + game_goals["ELAPSED"].tolist(),
-        "END": game_goals["ELAPSED"].tolist() + [game_length],
-        "LEADING_TEAM_COLOR": [TIED_COLOR] + game_goals["LEADING_TEAM_COLOR"].tolist(),
-    })
+    # One piece of bar per stretch of fct_games_leading_segments, coloured by the team leading
+    home_color, away_color = game_colors(game["HOME_TEAM"], game["AWAY_TEAM"])
+    pieces = pd.DataFrame(json.loads(game["LEADING_SEGMENTS"]))
+    pieces["LEADING_TEAM_COLOR"] = pieces["STATE"].map(
+        {"home_leads": home_color, "away_leads": away_color, "tied": TIED_COLOR}
+    )
+    # The stretches of a game going to a shootout stop at the end of the 3rd: the last one, tied,
+    # goes on through the OT
+    pieces.loc[pieces.index[-1], "END"] = game_length
 
-    game = game_goals.iloc[0]  # the game's own columns are the same on every goal
     if game["LAST_PERIOD_TYPE"] == "SO":
         game_goals = pd.concat([game_goals, pd.DataFrame([shootout_goal(game, game_length)])], ignore_index=True)
 
@@ -354,7 +365,6 @@ EVENT_TYPES = {
 }
 # Shown whatever the filter, as a thin line rather than a row (period-start is the period's title)
 STRUCTURE_EVENTS = {"period-start", "period-end", "game-end", "shootout-complete"}
-SITUATION_LABELS = {"PP": "Power play", "EA": "Extra attacker"}
 ZONES = {"O": "Offensive zone", "D": "Defensive zone", "N": "Neutral zone"}
 
 
@@ -434,21 +444,32 @@ def structure_line(event, details):
 
 
 def goal_types(event):
-    """Tags of a penalty shot, power play, short-handed, empty net or extra attacker goal (labels as
-    in games.GOAL_TYPE_LABELS). PP is only the situation with both goalies in, the team with more
-    skaters being MAN_ADV_TEAM_ID; no goalie in the defending net means an empty net."""
-    if event["SITUATION"] == "PS":
-        return ["🎯 Penalty shot"]
+    """Tags of a goal: its strength and its net, which can both apply, like a power play goal into an
+    empty net. fct_games_events is from the game's side, so the scoring team is compared with the team
+    on the power play and with the team that pulled its goalie."""
+    if event["STRENGTH_SITUATION"] == "PS":
+        return [STRENGTH_LABELS["PS"]]
     tags = []
-    if event["SITUATION"] == "PP":
-        if event["MAN_ADV_TEAM_ID"] == event["EVENT_TEAM_ID"]:
-            tags.append(f"⚡ Power play · {event['STRENGTH_ADV_TEAM']}")
-        else:
-            tags.append(f"🛡️ Short-handed · {event['STRENGTH_ADV_TEAM']}")
-    if not text(event["GOALIE"]):
-        tags.append("🥅 Empty net")
-    elif event["SITUATION"] == "EA":  # the scoring team pulled its own goalie
-        tags.append("➕ Extra attacker")
+    if event["STRENGTH_SITUATION"] == "PP":
+        strength = "PP" if event["MAN_ADV_TEAM_ID"] == event["EVENT_TEAM_ID"] else "SH"
+        tags.append(f"{STRENGTH_LABELS[strength]} · {event['STRENGTH_ADV_TEAM']}")
+    if event["NET_SITUATION"] == "PULLED":
+        tags.append(NET_LABELS["EA" if event["EMPTY_NET_TEAM_ID"] == event["EVENT_TEAM_ID"] else "EN"])
+    return tags
+
+
+def situation_tags(event):
+    """Tags of a play other than a goal, with the logo of the team concerned. The skaters are only
+    shown once when a team on the power play faces a pulled goalie."""
+    if event["STRENGTH_SITUATION"] == "PS":
+        return '<span class="pbp-tag">Penalty shot</span>'
+    tags = ""
+    skaters = f' · {event["STRENGTH_ADV_TEAM"]}'
+    if event["STRENGTH_SITUATION"] == "PP":
+        tags += f'<span class="pbp-tag">{image(event["MAN_ADV_LOGO"], "pbp-tag-logo")}Power play{skaters}</span>'
+        skaters = ""
+    if event["NET_SITUATION"] == "PULLED":
+        tags += f'<span class="pbp-tag">{image(event["EMPTY_NET_LOGO"], "pbp-tag-logo")}Extra attacker{skaters}</span>'
     return tags
 
 
@@ -467,11 +488,8 @@ def event_row(event, details):
     goal_tags = goal_types(event) if event["EVENT_TYPE"] == "goal" else []
     if goal_tags:
         right += "".join(f'<span class="pbp-tag pbp-goal-tag">{tag}</span>' for tag in goal_tags)
-    elif event["SITUATION"] == "PS":
-        right += '<span class="pbp-tag">Penalty shot</span>'
-    elif event["SITUATION"] in SITUATION_LABELS:
-        right += (f'<span class="pbp-tag">{image(event["MAN_ADV_LOGO"], "pbp-tag-logo")}'
-                  f'{SITUATION_LABELS[event["SITUATION"]]} · {event["STRENGTH_ADV_TEAM"]}</span>')
+    else:
+        right += situation_tags(event)
 
     return (
         f'<div class="pbp-row{" pbp-goal" if event["EVENT_TYPE"] == "goal" else ""}">'

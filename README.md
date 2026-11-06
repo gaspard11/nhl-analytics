@@ -10,7 +10,7 @@ What I have improved since the last full update of this README, on 7 October 202
 
 **In the app (see [Streamlit app](#streamlit-app))**
 
-* **New [Lead retention](#lead-retention) page.** How well each team holds on to its leads, on a chart that sorts the teams into profiles such as Killers, Collapsers or Come-backers, with an option to take the size of the leads into account.
+* **New [Lead retention](#lead-retention) page.** How well each team holds on to its leads, on a chart that sorts the teams into profiles such as Killers, Collapsers or Come-backers.
 * **Game stats.** Opening a game now compares the two teams: shots on goal, faceoffs, power play, penalty minutes, hits, blocked shots, giveaways and takeaways.
 * **Play by play log.** Every event of a game, with filters on the event type, the team and the period.
 * **Rosters.** The players who dressed for each team, by position, with their sweater number. The numbers also appear next to the names in the goal log and the play by play.
@@ -22,6 +22,7 @@ What I have improved since the last full update of this README, on 7 October 202
 
 * **Full play by play.** `fct_games_events` holds every play of every game, not only the goals, with the players involved, the puck coordinates and the manpower situation.
 * **Power play simulator.** `fct_games_pp_segments` is the project's first dbt Python model. It replays each game penalty by penalty with the NHL rules, to cut it into segments of constant strength and to count the official power play opportunities, which the play by play doesn't give.
+* **Strength and net situations.** Each goal and each play now has two separate columns, one for who has more skaters and one for which net is empty, so a power play goal into an empty net keeps both.
 * **Game stats model.** `fct_games_stats` gives each team's stats for each game, and feeds the new stats in the app.
 * **Leading time.** `fct_games_leading_segments` cuts each game by who is leading, which gives the time each team spent in the lead for the Lead retention page.
 * **Players from the play by play.** Names, teams and rosters now come from the play by play, so the separate calls to the player API are gone from the DAG.
@@ -56,22 +57,16 @@ I tried to keep the project as cheap as possible while still learning tools that
 | Airflow | Orchestration | Free (open source), but it needs a machine to run on |
 | GCP VM | Runs Airflow every morning | Less than $5 a month: the VM is only up about an hour a day |
 | dbt Cloud | Transformations | Free plan |
-| Snowflake | Data warehouse | Under $20 a month |
+| Snowflake | Data warehouse | Free: a new free trial account every month |
 | Streamlit Community Cloud | Hosts the app | Free |
 | GitHub Actions | Keeps the app awake | Free: a few minutes a day, well within the 2,000 free minutes a month |
 | Claude (Pro plan) | Teacher, debugging, code reviews (see [Disclaimer on AI usage](#disclaimer-on-ai-usage)) | $20 a month |
 
 **Airflow on GCP.** I could not leave my laptop on every morning, so Airflow runs on a GCP VM, which I set up with the help of Claude (see [Disclaimer on AI usage](#disclaimer-on-ai-usage)). A VM is not free, but Claude helped me find a way to keep it very cheap (see [Running Airflow on GCP for almost nothing](#running-airflow-on-gcp-for-almost-nothing)).
 
-**Snowflake.** The warehouse is the hardest part to make cheap. As said above, a warehouse is not needed for a project this size, but learning one was the point, so I chose Snowflake on the Standard edition, at $2 per credit. What keeps the bill down:
+**Snowflake.** The warehouse is the hardest part to make cheap. As said above, a warehouse is not needed for a project this size, but learning one was the point. So I use Snowflake free trials and change account every month. I know it is clunky, but it saves money, and setting up the account and the connections again is a good repetition exercise.
 
-* **One X-Small warehouse.** `NHL_APP_WH`, shared by Airflow, dbt and the app. It is the smallest size, billed 1 credit per hour of running time, and one warehouse means one start-up instead of three when the tools run back to back.
-* **Auto-suspend after 60 seconds.** The warehouse only runs while queries run. Each restart is billed for at least 60 seconds.
-* **A short daily load.** The Airflow load and the dbt run keep the warehouse up for a few minutes, about 0.3 credits a day. That is around $0.60 a day, so under $20 a month.
-* **App cache.** The app caches query results until the next morning's load, so visits mostly hit the cache instead of waking the warehouse.
-* **Tiny data.** Everything fits in a few dozen MB, so storage costs almost nothing.
-
-**Keeping the app awake.** On the free plan, Streamlit puts an app to sleep after 12 hours without a visit. The next visitor then lands on a "this app has gone to sleep" page and has to wait a minute for it to start, which is not great when the link is in a CV. Waking up also empties the app's cache, so every page queries Snowflake again. A scheduled GitHub Actions workflow opens every page of the app in a headless browser three times a day (00:10, 08:10 and 16:10 UTC), so it never reaches 12 hours without traffic. A simple ping would not be enough: Streamlit only counts a visit when a browser actually renders the page. The 08:10 run comes right after the daily cache refresh, so it also loads the day's data into the cache before the first real visitor. It costs a handful of queries a day in Snowflake, which the first visitor would have triggered anyway.
+**Keeping the app awake.** On the free plan, Streamlit puts an app to sleep after 12 hours without a visit. The next visitor then lands on a "this app has gone to sleep" page and has to wait a minute for it to start, which is not great when the link is in a CV. Waking up also empties the app's cache, so every page queries Snowflake again. A scheduled GitHub Actions workflow opens every page of the app in a headless browser three times a day (00:10, 08:10 and 16:10 UTC), so it never reaches 12 hours without traffic. A simple ping would not be enough: Streamlit only counts a visit when a browser actually renders the page. The 08:10 run comes right after the daily cache refresh, so it also loads the day's data into the cache before the first real visitor.
 
 ## Disclaimer on AI usage
 
@@ -174,7 +169,7 @@ Opening a game shows the timeline, then a chart and a log side by side, each wit
 * **Timeline**: one bar for the whole game, cut by period, in the colour of the team leading at that moment (grey when the score is tied). Each goal is the logo of the team that scored it, above the bar for the home team and below for the away team. Hovering over a goal shows the scorer's headshot, the assists, the score after the goal and the type of goal. In overtime the bar stops at the winning goal, and a shootout shows as one last goal for the winner.
 * **Stats** (chart, shown first): the two teams face to face. Each stat has its two values and a bar split by each team's share: shots on goal, faceoffs, power play %, penalty minutes, hits, blocked shots, giveaways and takeaways. Faceoffs also show the count, like `47% (27/57)`, and the power play shows goals over opportunities.
 * **Points** (chart): one bar per player who scored or assisted, in the team's colour, goals in full colour and assists lighter, with the player's headshot at the end of the bar.
-* **Goals** (log, shown first): every goal, period by period, with the scorer, the assists, the score, the time and the situation: power play, short handed, empty net, extra attacker, penalty shot or even strength, with the number of skaters on each side (`5 on 4`).
+* **Goals** (log, shown first): every goal, period by period, with the scorer, the assists, the score, the time and the situation: power play, short handed, empty net, extra attacker, penalty shot or even strength, with the number of skaters on each side (`5 on 4`). A goal can be two of those at once, like a power play goal into an empty net.
 * **Play by play** (log): every event of the game, period by period, with the team, a headshot, the players involved and the situation. Goals are highlighted, and whistles and period ends are thin lines between the events. It can be filtered on the event type, the team and the period.
 * **Rosters** (log): the two teams side by side, with their forwards, defensemen and goalies, each with their sweater number, headshot and position.
 
@@ -215,8 +210,6 @@ How well the teams hold on to their leads, from the start of the season up to th
 | Collapsers | More often than average | Less often than average |
 | Opportunists | Less often than average | More often than average |
 | Sinkers | Less often than average | Less often than average |
-
-**Add lead size influence** is a switch for both views. Blowing a 3 goal lead isn't the same as blowing a 1 goal lead, so each game then counts for what its lead should have brought: the share of the games the league won with a lead of that size, over all seasons. Leads of 3 goals or more are grouped, as they are too rare to have their own rate. In the Whole game view, the time in the lead is replaced by the expected wins, from the biggest lead of each game in regulation. In the After 2 periods view, the share of leads kept is replaced by the wins above or below the expected wins. A big lead blown then costs more than a small one, and a big lead kept brings little.
 
 ### Cache
 

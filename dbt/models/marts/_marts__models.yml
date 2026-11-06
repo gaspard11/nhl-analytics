@@ -184,17 +184,26 @@ models:
         description: Time left in the period when the goal was scored, as `MM:SS`.
       - name: fetched_at
         description: "{{ doc('fetched_at') }}"
-      - name: goal_type
+      - name: strength_situation
         description: >
-          Situation of the goal from the scoring team's point of view, worked out from situation_code.
-          PS = penalty shot, EN = empty net (the other team's goalie was pulled), PPG = power play goal,
-          SHG = short handed goal, EA = extra attacker (the scoring team had pulled its goalie, sides
-          otherwise even), EV = even strength. A pulled goalie is not counted as a power play.
+          Who had more skaters, from the scoring team's point of view, worked out from situation_code.
+          PS = penalty shot, PP = power play, SH = short handed, EV = even strength. The extra skater of a
+          pulled goalie is taken off both sides first, so a goal into the empty net of a penalised team is PP.
         data_tests:
           - not_null
           - accepted_values:
               arguments:
-                values: ['PS', 'EN', 'PPG', 'SHG', 'EA', 'EV']
+                values: ['PS', 'PP', 'SH', 'EV']
+      - name: net_situation
+        description: >
+          Which net was empty, from the scoring team's point of view, worked out from situation_code.
+          EN = empty net (the other team had pulled its goalie), EA = extra attacker (the scoring team had
+          pulled its goalie), NORMAL = both goalies in. Independent of strength_situation.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['EN', 'EA', 'NORMAL']
       - name: strength
         description: >
           Skaters on the ice when the goal was scored, scoring team first, e.g. `5 on 4`.
@@ -257,20 +266,33 @@ models:
         description: Goalie in net for a shot or goal. Null when the net was empty.
       - name: details
         description: The full `details` object of the play, as JSON, for the fields not parsed into columns.
-      - name: situation
+      - name: strength_situation
         description: >
           Manpower situation of the play, from the game's side (not one team's), worked out from situation_code.
-          PS = penalty shot, EA = extra attacker (a team had pulled its goalie), PP = power play
-          (one team had more skaters), EV = even strength.
+          PS = penalty shot, PP = power play (one team had more skaters), EV = even strength. The extra
+          skater of a pulled goalie is taken off both sides first.
         data_tests:
           - not_null
           - accepted_values:
               arguments:
-                values: ['PS', 'EA', 'PP', 'EV']
+                values: ['PS', 'PP', 'EV']
+      - name: net_situation
+        description: >
+          PULLED = a team had pulled its goalie (see empty_net_team_id), NORMAL = both goalies in.
+          Independent of strength_situation.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['PULLED', 'NORMAL']
+      - name: empty_net_team_id
+        description: Team that had pulled its goalie. Null when both goalies are in.
       - name: strength_adv_team
         description: Skaters on each side, the team with more skaters first, e.g. `5 on 4`. `Penalty shot` for a penalty shot.
       - name: man_adv_team_id
-        description: Team with more skaters on the ice. Null when the sides are even.
+        description: >
+          Team with more skaters, once the extra skater of a pulled goalie is taken off both sides.
+          Null when the sides are even.
       - name: fetched_at
         description: Latest load of the game, between its play-by-play and its game row.
 
@@ -313,7 +335,7 @@ models:
         description: Team with more skaters (on the power play). Null at even strength.
       - name: pk_team_id
         description: Team with fewer skaters (killing the penalty). Null at even strength.
-      - name: situation
+      - name: strength_situation
         description: "`Even`, `PP home` or `PP away`, depending on which team has more skaters."
       - name: strength
         description: Skaters of the home team then of the away team, e.g. `5v5`, `4v5`, `3v3`.
