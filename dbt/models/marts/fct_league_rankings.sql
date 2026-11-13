@@ -37,6 +37,7 @@ with standings as (
         last_10_wins,
         last_10_regulation_losses,
         last_10_ot_losses,
+        last_10_results,
         streak_result,
         streak_length,
         tie_group_id,
@@ -112,6 +113,7 @@ select
     away_wins || '-' || away_regulation_losses || '-' || away_ot_losses             as away_record,
     shootout_wins || '-' || shootout_losses                                         as shootout_record,
     last_10_wins || '-' || last_10_regulation_losses || '-' || last_10_ot_losses    as last_10_record,
+    last_10_results,
     streak_result || streak_length                                                  as streak,  -- null before the 1st game
     tie_rate,
     _batch_loaded_at
