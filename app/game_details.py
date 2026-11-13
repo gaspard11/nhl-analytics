@@ -1,7 +1,7 @@
 """What the Games page shows when a game is opened: the score timeline, the players' points, the
 goal log, the play-by-play log and the rosters. Each function takes the goals of one game, as
-prepared by games.prepare_goals, except pbp_log which takes its events, as prepared by
-games.prepare_events, and roster_log which takes its players."""
+loaded by load_goals, except pbp_log which takes its events, as prepared by games.prepare_events,
+and roster_log which takes its players."""
 
 import altair as alt
 import pandas as pd
@@ -9,7 +9,7 @@ import streamlit as st
 import html
 import json
 
-from common import TIED_COLOR, game_colors
+from common import TIED_COLOR, fetch_query, game_colors
 
 
 PERIOD_NAMES = {1: "1st", 2: "2nd", 3: "3rd", 4: "OT"}
@@ -25,6 +25,133 @@ NET_LABELS = {"EN": "🥅 Empty net", "EA": "➕ Extra attacker"}
 
 
 # ---------------------------------------------------------------------------
+# Goals: one row per goal, with its game's columns repeated
+# ---------------------------------------------------------------------------
+
+# The stretches of the timeline come along as one JSON column, repeated on each goal like the other
+# columns of the game, which saves a query of their own
+GOALS_SQL = """
+    with leading_segments as (
+        select
+            game_id,
+            to_json(
+                array_agg(object_construct('STATE', state, 'START', start_s, 'END', end_s))
+                    within group (order by start_s, end_s)
+            ) as leading_segments
+        from nhl_analytics.marts.fct_games_leading_segments
+        group by game_id
+    )
+
+    select
+        games.game_id,
+        games.game_date,
+        games.season,
+        games.last_period_type,
+        home_teams.name as home_team,
+        away_teams.name as away_team,
+        games.home_team_id,
+        home_teams.logo_url as home_team_logo,
+        away_teams.logo_url as away_team_logo,
+        games.home_team_score as home_team_final_score,
+        games.away_team_score as away_team_final_score,
+        scorers.first_name || ' ' || scorers.last_name || coalesce(' #' || scorer_rosters.sweater_number, '') as scorer,
+        assist1.first_name || ' ' || assist1.last_name || coalesce(' #' || assist1_rosters.sweater_number, '') as assist1,
+        assist2.first_name || ' ' || assist2.last_name || coalesce(' #' || assist2_rosters.sweater_number, '') as assist2,
+        scorers.headshot_url as scorer_headshot,
+        assist1.headshot_url as assist1_headshot,
+        assist2.headshot_url as assist2_headshot,
+        goals.home_score,
+        goals.away_score,
+        goals.team_id as scoring_team_id,
+        goals.period_number,
+        goals.time_in_period,
+        goals.strength_situation,
+        goals.net_situation,
+        goals.strength,
+        leading_segments.leading_segments
+    from nhl_analytics.marts.fct_games as games
+    inner join nhl_analytics.marts.dim_teams as home_teams
+        on games.home_team_id = home_teams.team_id
+    inner join nhl_analytics.marts.dim_teams as away_teams
+        on games.away_team_id = away_teams.team_id
+    inner join leading_segments
+        on games.game_id = leading_segments.game_id
+    -- Left joins: a game without a goal (0-0 until a shootout) keeps one row, its goal columns empty
+    left join nhl_analytics.marts.fct_goals as goals
+        on games.game_id = goals.game_id
+    left join nhl_analytics.marts.dim_players as scorers
+        on goals.scoring_player_id = scorers.player_id
+    left join nhl_analytics.marts.dim_players as assist1
+        on goals.assist1_player_id = assist1.player_id
+    left join nhl_analytics.marts.dim_players as assist2
+        on goals.assist2_player_id = assist2.player_id
+    -- Sweater numbers worn in this game, shown next to the names
+    left join nhl_analytics.marts.fct_game_rosters as scorer_rosters
+        on goals.game_id = scorer_rosters.game_id and goals.scoring_player_id = scorer_rosters.player_id
+    left join nhl_analytics.marts.fct_game_rosters as assist1_rosters
+        on goals.game_id = assist1_rosters.game_id and goals.assist1_player_id = assist1_rosters.player_id
+    left join nhl_analytics.marts.fct_game_rosters as assist2_rosters
+        on goals.game_id = assist2_rosters.game_id and goals.assist2_player_id = assist2_rosters.player_id
+    order by games.game_date, games.game_id, goals.period_number, goals.time_in_period
+"""
+
+
+def goal_label(strength_situation, net_situation, strength):
+    """Label shown for a goal, e.g. "⚡ Power play · 5 on 4" or "⚡ Power play · 🥅 Empty net · 5 on 5". A
+    penalty shot has no skaters, and "Even strength" isn't worth saying next to an empty net."""
+    if strength_situation == "PS":
+        return STRENGTH_LABELS["PS"]
+    net_label = NET_LABELS.get(net_situation)
+    if net_label and strength_situation == "EV":
+        return f"{net_label} · {strength}"
+    labels = [STRENGTH_LABELS[strength_situation], net_label, strength]
+    return " · ".join(label for label in labels if label)
+
+
+def goal_situation(goals):
+    """Label shown for each goal, worked out from the two situations of fct_goals."""
+    return [
+        goal_label(*situations)
+        for situations in zip(goals["STRENGTH_SITUATION"], goals["NET_SITUATION"], goals["STRENGTH"])
+    ]
+
+
+def prepare_goals(goals):
+    """Adds the columns used by the game details. Done once a day for every goal, not game by game."""
+    goals = goals.assign(
+        PERIOD_NUMBER=goals["PERIOD_NUMBER"].astype(int),  # Snowflake returns a small int type
+        # Floats, because of the empty row of the games without a goal
+        HOME_SCORE=goals["HOME_SCORE"].astype(int),
+        AWAY_SCORE=goals["AWAY_SCORE"].astype(int),
+    )
+    minutes_seconds = goals["TIME_IN_PERIOD"].str.split(":", expand=True).astype(int)
+    is_home_goal = goals["SCORING_TEAM_ID"] == goals["HOME_TEAM_ID"]
+    return goals.assign(
+        ELAPSED=(goals["PERIOD_NUMBER"] - 1) * 1200 + minutes_seconds[0] * 60 + minutes_seconds[1],  # seconds into the game
+        SCORING_TEAM_SIDE=is_home_goal.map({True: "HOME", False: "AWAY"}),
+        SCORING_TEAM=goals["HOME_TEAM"].where(is_home_goal, goals["AWAY_TEAM"]),
+        SCORING_TEAM_LOGO=goals["HOME_TEAM_LOGO"].where(is_home_goal, goals["AWAY_TEAM_LOGO"]),
+        GOAL_TYPE=goal_situation(goals),
+        GOAL_TIME=goals["PERIOD_NUMBER"].map(PERIOD_NAMES) + " period · " + goals["TIME_IN_PERIOD"],
+        ASSISTS=goals[["ASSIST1", "ASSIST2"]].apply(lambda names: ", ".join(names.dropna()) or "Unassisted", axis=1),
+        SCORE=goals["HOME_TEAM"] + " " + goals["HOME_SCORE"].astype(str)
+            + " - " + goals["AWAY_SCORE"].astype(str) + " " + goals["AWAY_TEAM"],
+    )
+
+
+@st.cache_resource(max_entries=1, show_spinner="Loading data...")
+def load_goals(version):
+    """One row per game, the goals of each game by game id, and an empty goals table for the games
+    without a goal. `version` is unused in the body: a new day is a new cache entry (see
+    data_version), so Snowflake is only queried once a day. cache_resource doesn't copy the data on
+    every rerun like cache_data, but every user shares the same objects, so they must never be
+    modified."""
+    rows = fetch_query(GOALS_SQL)
+    goals = prepare_goals(rows.dropna(subset=["TIME_IN_PERIOD"]))
+    return rows.drop_duplicates(subset=["GAME_ID"]), dict(tuple(goals.groupby("GAME_ID"))), goals.iloc[:0]
+
+
+# ---------------------------------------------------------------------------
 # Timeline: a bar over the length of the game in the leading team's colour, cut by period,
 # with the scoring team's logo at each goal (home above the bar, away below)
 # ---------------------------------------------------------------------------
@@ -37,6 +164,22 @@ GAP = 4  # between the bar, the logos and the period names
 GOAL_LOGO_OFFSET = BAR_HEIGHT / 2 + GAP + GOAL_LOGO_HEIGHT / 2  # from the middle to a logo's centre
 LABELS_OFFSET = GOAL_LOGO_OFFSET + GOAL_LOGO_HEIGHT / 2 + GAP + 6  # period names, under the away logos
 TIMELINE_HEIGHT = 2 * (LABELS_OFFSET + 8)  # same room above the bar as below it
+
+# For the pages with a timeline, in a <style> tag
+TIMELINE_TOOLTIP_CSS = """
+/* Streamlit's tooltip styles leave with the last chart of the page, which showed the old tooltip's
+   pill after closing a game. This rule stays, so a tooltip not in use is always hidden */
+#vg-tooltip-element:not(.visible) { display: none; }
+/* Goal tooltips of the timeline: centred title, round headshot */
+#vg-tooltip-element h2 { font-size: 14px; margin: 0 0 6px; text-align: center; }
+#vg-tooltip-element img { display: block; width: 120px; height: 120px; margin: 0 auto 6px; border-radius: 50%; background: #f0f2f6; }
+/* First row of the goal tooltip (the goal type) shown as a pill centred under the headshot. A table row
+   can't be wider than its columns, so the row only keeps the height and the pill is centred on the
+   whole tooltip */
+#vg-tooltip-element tr:first-child { height: 30px; }
+#vg-tooltip-element tr:first-child td.key { display: none; }
+#vg-tooltip-element tr:first-child td.value { position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; padding: 2px 10px; border-radius: 999px; background: #e8eefc; color: #1f3b8f; font-weight: 600; font-size: 12px; }
+"""
 
 
 def shootout_goal(game, game_length):
@@ -155,6 +298,18 @@ def timeline_chart(game, game_goals, has_overtime, overtime_length=300):
         ),
         width="stretch",
     )
+
+
+def game_timeline(game, game_goals):
+    """The timeline of a game, with its overtime if it had one."""
+    if game["LAST_PERIOD_TYPE"] == "SO":
+        overtime_length = 1200
+    elif game["LAST_PERIOD_TYPE"] == "OT":
+        # The OT ends with the winning goal
+        overtime_length = game_goals.loc[game_goals["PERIOD_NUMBER"] == 4, "ELAPSED"].max() - 3600
+    else:
+        overtime_length = None
+    timeline_chart(game, game_goals, has_overtime=game["LAST_PERIOD_TYPE"] != "REG", overtime_length=overtime_length)
 
 
 # ---------------------------------------------------------------------------

@@ -86,6 +86,14 @@ TEAM_COLORS_SEC = {
 TIED_COLOR = "#e6e6e6"  # timeline bar while the score is tied, and any team without a colour
 CLOSE_COLORS = 130  # under this color_distance, two teams can't be told apart on a chart
 
+# Pairs under CLOSE_COLORS that still look different on a chart: Minnesota's forest green next to a
+# navy. Both keep their main colour, so that Minnesota stays green instead of switching to its red
+DISTINCT_PAIRS = {
+    frozenset({"Minnesota Wild", "Toronto Maple Leafs"}),
+    frozenset({"Minnesota Wild", "Vancouver Canucks"}),
+    frozenset({"Minnesota Wild", "Tampa Bay Lightning"}),
+}
+
 
 def color_distance(color_1, color_2):
     """How different two "#RRGGBB" colours look: 0 when identical, 765 from black to white.
@@ -102,10 +110,12 @@ def color_distance(color_1, color_2):
 
 def game_colors(home_team, away_team):
     """(home colour, away colour) for the charts of one game: their main colours, except that the
-    away team takes its secondary colour when the two are too close."""
+    away team takes its secondary colour when the two are too close, unless the pair is in
+    DISTINCT_PAIRS."""
     home_color = TEAM_COLORS_MAIN.get(home_team, TIED_COLOR)
     away_color = TEAM_COLORS_MAIN.get(away_team, TIED_COLOR)
-    if color_distance(home_color, away_color) < CLOSE_COLORS:
+    too_close = color_distance(home_color, away_color) < CLOSE_COLORS
+    if too_close and frozenset({home_team, away_team}) not in DISTINCT_PAIRS:
         away_color = TEAM_COLORS_SEC.get(away_team, away_color)
     return home_color, away_color
 
