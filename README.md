@@ -10,7 +10,7 @@ What I have improved since the last full update of this README, on 7 October 202
 
 **In the app (see [Streamlit app](#streamlit-app))**
 
-* **New [Lead retention](#lead-retention) page.** How well each team holds on to its leads, on a chart that sorts the teams into profiles such as Killers, Collapsers or Come-backers.
+* **New [Lead retention](#lead-retention) page.** Which teams turn their time in the lead into points, and which let their leads slip, compared with the league trend.
 * **Game stats.** Opening a game now compares the two teams: shots on goal, faceoffs, power play, penalty minutes, hits, blocked shots, giveaways and takeaways.
 * **Play by play log.** Every event of a game, with filters on the event type, the team and the period.
 * **Rosters.** The players who dressed for each team, by position, with their sweater number. The numbers also appear next to the names in the goal log and the play by play.
@@ -189,27 +189,9 @@ Players ranked by points, goals or assists on the chosen date, with their headsh
 
 ### Lead retention
 
-How well the teams hold on to their leads, from the start of the season up to the chosen date. The page shows one logo per team on a chart, and a table next to it with the numbers and each team's label. Two views are available, and the page explains how to read each one above the chart.
+Which teams turn their time in the lead into points, from the start of the season up to the chosen date. The page shows one logo per team on a chart, and a table next to it with the numbers, the teams with the most points per game first. The page explains how to read the chart above it.
 
-**Whole game** compares the share of the time a team leads with the share of the games it wins. The time in the lead is counted against the time trailing, so tied time and overtime don't count. Wins include overtime and shootout wins. The 50% lines and a red line, where a team wins exactly as often as it leads, split the chart into six areas:
-
-| Label | Leads more than it trails | Wins |
-|---|---|---|
-| Killers | Yes | More than half of its games, and at least as often as it leads |
-| Leaky contenders | Yes | More than half of its games, but less often than it leads |
-| Collapsers | Yes | Less than half of its games |
-| Come-backers | No | More than half of its games |
-| Scrappers | No | Less than half of its games, but more often than it leads |
-| Sinkers | No | Less than half of its games, and no more often than it leads |
-
-**After 2 periods** compares how often a team leads after two periods with how often it then wins those games. A loss in overtime or in a shootout counts as a lead blown. The league averages split the chart into four areas:
-
-| Label | Leads after 2 periods | Keeps those leads |
-|---|---|---|
-| Killers | More often than average | More often than average |
-| Collapsers | More often than average | Less often than average |
-| Opportunists | Less often than average | More often than average |
-| Sinkers | Less often than average | Less often than average |
+The chart puts the minutes a team spends in the lead per game against its points per game (2 for a win, 1 for a loss in overtime or in a shootout). Overtime adds no time in the lead, as it ends on the first goal. The red line is the league trend, a straight line fitted through the teams on the chosen date: the points per game a team usually gets for its time in the lead. A team below it gets fewer points than its time in the lead suggests, so it lets its leads slip. A toggle switches between the time in the lead over the whole game and in the 3rd period only, where a lead is closest to becoming a win.
 
 ### Cache
 
@@ -230,7 +212,7 @@ dbt/
   README.md                    models, tests and the incremental logic in detail
 app/
   app.py                       entry point and navigation
-  games.py, game_details.py    Games page
+  games.py, game_details.py    Games page, and its game details (timeline and goals)
   standings.py                 Standings page
   evolution.py                 Evolution page
   player_stats.py              Player stats page

@@ -197,7 +197,7 @@ A team with no row for a stat simply had none of it, and the app shows 0.
 
 ### Leading segments (`fct_games_leading_segments`)
 
-Cuts each game by the score, from `fct_goals`: one row per stretch with the same team leading, or tied. Two goals in a row by the leading team stay in one stretch. `leading_team_id` is 0 when the score is tied, and times are in seconds since the start of the game. Shootout goals aren't in `fct_goals`, so a game going to a shootout ends tied. Summed per team, this gives the `Leading time` stat of `fct_games_stats`, which the Lead retention page of the app compares with the time trailing.
+Cuts each game by the score, from `fct_goals`: one row per stretch with the same team leading, or tied. Two goals in a row by the leading team stay in one stretch. `leading_team_id` is 0 when the score is tied, and times are in seconds since the start of the game. Shootout goals aren't in `fct_goals`, so a game going to a shootout ends tied. Summed per team, this gives the `Leading time` stat of `fct_games_stats`, which the Lead retention page of the app compares with the points won.
 
 ### Team travel (`fct_team_travel`)
 

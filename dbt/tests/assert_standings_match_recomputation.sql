@@ -10,7 +10,9 @@
     'regulation_wins':    'sum(g.regulation_win)',
     'regulation_ot_wins': 'sum(g.regulation_ot_win)',
     'goals_for':          'sum(g.goals_for)',
-    'goals_against':      'sum(g.goals_against)'
+    'goals_against':      'sum(g.goals_against)',
+    'losses':             'sum(g.regulation_loss)',
+    'ot_losses':          'sum(g.ot_loss)'
 } %}
 
 with latest as (

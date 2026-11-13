@@ -3,6 +3,7 @@
 --   - regulation wins <= regulation + OT wins <= total wins
 --   - every win is worth 2 points, and each loss at most 1 (OT/SO loss)
 --   - goal differential = goals for - goals against
+--   - every game is a win, a regulation loss or an OT/SO loss
 -- Catches a result flag computed wrong in int_team_game_results, or swapped columns.
 -- Returns the rows that break a rule.
 
@@ -14,3 +15,4 @@ where total_wins > games_played
    or points < 2 * total_wins
    or points - 2 * total_wins > games_played - total_wins
    or goal_diff <> goals_for - goals_against
+   or total_wins + losses + ot_losses <> games_played
