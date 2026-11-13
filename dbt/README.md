@@ -310,11 +310,3 @@ They are in `tests/`. Each one returns the rows that break its rule, so a passin
 | `assert_team_record_is_consistent` | `fct_league_rankings` | For every team and day: `total_wins` ≤ `games_played`, `regulation_wins` ≤ `regulation_ot_wins` ≤ `total_wins`, `points` ≥ 2 × `total_wins`, `points` − 2 × `total_wins` ≤ losses (each loss is worth at most 1 point), and `goal_diff` = `goals_for` − `goals_against` |
 | `assert_league_totals_balance` | `fct_league_rankings` | For the whole league on every day: 2 × the sum of `total_wins` = the sum of `games_played` (one winner per game, two teams per game), and the sum of `goals_for` = the sum of `goals_against`. Catches a game counted for only one of its two teams |
 | `assert_pbp_goals_match_final_score` | `stg_nhl_api__goals` | For every finished game, the number of goals in the play by play equals `home_team_score` + `away_team_score`, minus 1 for a game decided in a shootout (the final score gives the shootout winner one goal, but shootout goals are not in the play by play). Catches a play by play loaded before the end of the game, or never loaded |
-
-## Known limitations
-
-* Regular season only: the DAG requests `gameType = 2`, and the `REG` / `OT` / `SO` logic assumes a single overtime period.
-* Teams come from the `nhl_teams` seed, with the current 32 franchises and their current arenas. An older season with other teams, or a game played at a neutral site (like the Global Series games in Europe), would need more than one arena per team.
-* Shootouts: the final score gives the shootout winner one extra goal, as the NHL does. Shootout goals are left out of the play by play and of player stats.
-* Power play simulator: it was compared with the NHL's situation codes on a sample of games, not on whole seasons, so a rare combination of penalties could still give a wrong segment.
-* Strength situation: it only sees the situation code. A goal scored into an empty net just after the goalie left, before the extra skater is on the ice, looks like a penalised team and would be `PP` + `EN`.
