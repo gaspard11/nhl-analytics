@@ -7,7 +7,8 @@
 
 -- League standings per day. The cumulative totals come from int_league_ranking_pre_tie_breaker;
 -- this model only applies the tie-breakers and ranks. Each run picks up exactly the rows the
--- upstream model (re)computed since this model's last run.
+-- upstream model (re)computed since this model's last run. The records (L, OT, P%, home, away,
+-- shootout, last 10, streak) are for display only: they play no part in the ranking.
 
 with standings as (
 
@@ -23,6 +24,21 @@ with standings as (
         goals_for,
         goals_against,
         diff,
+        regulation_losses,
+        ot_losses,
+        home_wins,
+        home_regulation_losses,
+        home_ot_losses,
+        away_wins,
+        away_regulation_losses,
+        away_ot_losses,
+        shootout_wins,
+        shootout_losses,
+        last_10_wins,
+        last_10_regulation_losses,
+        last_10_ot_losses,
+        streak_result,
+        streak_length,
         tie_group_id,
         _batch_loaded_at
     from {{ ref('int_league_ranking_pre_tie_breaker') }}
@@ -89,6 +105,14 @@ select
     regulation_wins,
     regulation_ot_wins,
     total_wins,
+    regulation_losses   as losses,
+    ot_losses,
+    cumul_points / nullif(games_played * 2, 0)                                      as points_pct,
+    home_wins || '-' || home_regulation_losses || '-' || home_ot_losses             as home_record,
+    away_wins || '-' || away_regulation_losses || '-' || away_ot_losses             as away_record,
+    shootout_wins || '-' || shootout_losses                                         as shootout_record,
+    last_10_wins || '-' || last_10_regulation_losses || '-' || last_10_ot_losses    as last_10_record,
+    streak_result || streak_length                                                  as streak,  -- null before the 1st game
     tie_rate,
     _batch_loaded_at
 from standings_with_tie_rate

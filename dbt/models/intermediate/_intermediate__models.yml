@@ -15,6 +15,21 @@ models:
               arguments:
                 values: [0, 1, 2]
                 quote: false
+      - name: regulation_loss
+        description: 1 for a loss in regulation.
+      - name: ot_loss
+        description: 1 for a loss in overtime or in a shootout.
+      - name: shootout_win
+        description: 1 for a win in a shootout.
+      - name: shootout_loss
+        description: 1 for a loss in a shootout.
+      - name: result
+        description: W for a win, L for a loss in regulation, OT for a loss in overtime or in a shootout.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['W', 'L', 'OT']
 
   - name: int_league_ranking_pre_tie_breaker
     description: >
@@ -24,7 +39,60 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['season', 'ranking_date', 'team_id']
+      # Every game is a win, a regulation loss or an OT/SO loss, at home or away
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              total_wins + regulation_losses + ot_losses = games_played
+              and home_wins + away_wins = total_wins
+              and home_regulation_losses + away_regulation_losses = regulation_losses
+              and home_ot_losses + away_ot_losses = ot_losses
+              and shootout_wins <= total_wins
+              and shootout_losses <= ot_losses
+      # The last 10 games are the last 10 played, or all of them before the 10th
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              last_10_wins + last_10_regulation_losses + last_10_ot_losses = least(games_played, 10)
+              and coalesce(streak_length, 0) <= games_played
+              and (streak_result is null) = (games_played = 0)
     columns:
+      - name: regulation_losses
+        description: Season-to-date losses in regulation.
+      - name: ot_losses
+        description: Season-to-date losses in overtime or in a shootout.
+      - name: home_wins
+        description: Season-to-date wins at home, shootout wins included.
+      - name: home_regulation_losses
+        description: Season-to-date losses in regulation at home.
+      - name: home_ot_losses
+        description: Season-to-date losses in overtime or in a shootout at home.
+      - name: away_wins
+        description: Season-to-date wins away, shootout wins included.
+      - name: away_regulation_losses
+        description: Season-to-date losses in regulation away.
+      - name: away_ot_losses
+        description: Season-to-date losses in overtime or in a shootout away.
+      - name: shootout_wins
+        description: Season-to-date wins in a shootout.
+      - name: shootout_losses
+        description: Season-to-date losses in a shootout.
+      - name: last_10_wins
+        description: >
+          Wins in the team's last 10 games up to that day (all its games before the 10th). Not a
+          running total: recomputed from the game history for each day of the batch.
+      - name: last_10_regulation_losses
+        description: Losses in regulation in the team's last 10 games up to that day.
+      - name: last_10_ot_losses
+        description: Losses in overtime or in a shootout in the team's last 10 games up to that day.
+      - name: streak_result
+        description: Result of the team's last game up to that day (W, L or OT). Null before its first game.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['W', 'L', 'OT']
+      - name: streak_length
+        description: Number of games in a row with streak_result, ending with the last game. Null before the first game.
       - name: tie_group_id
         description: >
           Shared by teams equal on points, games played, regulation wins, regulation + OT wins

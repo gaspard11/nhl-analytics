@@ -63,6 +63,11 @@ select
     iff(goals_for > goals_against, 1, 0)                                as win,
     iff(goals_for > goals_against and last_period_type = 'REG', 1, 0)   as regulation_win,
     iff(goals_for > goals_against and last_period_type <> 'SO', 1, 0)   as regulation_ot_win,
+    iff(goals_for < goals_against and last_period_type = 'REG', 1, 0)   as regulation_loss,
+    iff(goals_for < goals_against and last_period_type <> 'REG', 1, 0)  as ot_loss,
+    iff(goals_for < goals_against and last_period_type = 'SO', 1, 0)   as shootout_loss,
+    iff(goals_for > goals_against and last_period_type = 'SO', 1, 0)   as shootout_win,
+    iff(goals_for > goals_against, 'W', iff(last_period_type = 'REG','L','OT')) as result,
     case
         when goals_for > goals_against then 2
         when last_period_type <> 'REG' then 1   -- overtime or shootout loss

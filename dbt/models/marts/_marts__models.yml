@@ -9,6 +9,12 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: ['season', 'ranking_date', 'team_id']
+      # A streak is a result and a number of games: W2, L1, OT1 (regexp_like matches the whole string)
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "regexp_like(streak, '(W|L|OT)[1-9][0-9]*')"
+          config:
+            where: "streak is not null"
     columns:
       - name: ranking_date
         description: "{{ doc('ranking_date') }}"
@@ -49,6 +55,41 @@ models:
         description: Season-to-date wins in regulation or overtime, i.e. excluding shootout wins (ROW).
       - name: total_wins
         description: Season-to-date wins, including shootout wins.
+      - name: losses
+        description: Season-to-date losses in regulation (L).
+        data_tests:
+          - not_null
+      - name: ot_losses
+        description: Season-to-date losses in overtime or in a shootout (OT).
+        data_tests:
+          - not_null
+      - name: points_pct
+        description: Points % (P%) = points / (2 x games played), between 0 and 1. Null on day 0.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: home_record
+        description: Record at home, W-L-OT (for example 9-2-1). Shootout wins count as W, shootout losses as OT.
+        data_tests:
+          - not_null
+      - name: away_record
+        description: Record away, W-L-OT, as home_record.
+        data_tests:
+          - not_null
+      - name: shootout_record
+        description: Record in shootouts, W-L (for example 1-0).
+        data_tests:
+          - not_null
+      - name: last_10_record
+        description: Record in the team's last 10 games up to that day, W-L-OT (for example 6-1-1). Fewer games before the 10th.
+        data_tests:
+          - not_null
+      - name: streak
+        description: >
+          Current streak: the result of the last game and how many games in a row ended that way,
+          for example W2, L1 or OT1 (OT = overtime or shootout loss). Null before the first game.
       - name: tie_rate
         description: >
           Head-to-head points % (between 0 and 1) against the other teams tied with this one on points,
