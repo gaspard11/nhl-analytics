@@ -302,6 +302,9 @@ recent_form as (
         sum(iff(r.games_ago <= 10 and r.result = 'W', 1, 0))  as last_10_wins,
         sum(iff(r.games_ago <= 10 and r.result = 'L', 1, 0))  as last_10_regulation_losses,
         sum(iff(r.games_ago <= 10 and r.result = 'OT', 1, 0)) as last_10_ot_losses,
+        -- The same 10 results in order, oldest first: "W,L,OT,..." (listagg skips the nulls)
+        listagg(iff(r.games_ago <= 10, r.result, null), ',')
+            within group (order by r.games_ago desc)           as last_10_results,
         l.last_result                                          as streak_result,
         coalesce(
             min(iff(r.result <> l.last_result, r.games_ago, null)) - 1,
@@ -324,6 +327,7 @@ standings as (
         coalesce(f.last_10_wins, 0)              as last_10_wins,
         coalesce(f.last_10_regulation_losses, 0) as last_10_regulation_losses,
         coalesce(f.last_10_ot_losses, 0)         as last_10_ot_losses,
+        f.last_10_results,
         f.streak_result,
         f.streak_length
     from cumulative c
@@ -359,6 +363,7 @@ select
     last_10_wins::integer                    as last_10_wins,
     last_10_regulation_losses::integer       as last_10_regulation_losses,
     last_10_ot_losses::integer               as last_10_ot_losses,
+    last_10_results,
     streak_result,
     streak_length::integer                   as streak_length,
     {{ nhl_tie_group_id(ranking_date='ranking_date') }} as tie_group_id,

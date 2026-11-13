@@ -86,6 +86,10 @@ models:
         description: Record in the team's last 10 games up to that day, W-L-OT (for example 6-1-1). Fewer games before the 10th.
         data_tests:
           - not_null
+      - name: last_10_results
+        description: >
+          The results of the team's last 10 games up to that day, oldest first, comma separated
+          (W, L or OT, for example W,W,L,OT,W). Same games as last_10_record. Null before the first game.
       - name: streak
         description: >
           Current streak: the result of the last game and how many games in a row ended that way,

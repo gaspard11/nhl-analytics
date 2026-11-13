@@ -85,6 +85,10 @@ models:
         description: Losses in regulation in the team's last 10 games up to that day.
       - name: last_10_ot_losses
         description: Losses in overtime or in a shootout in the team's last 10 games up to that day.
+      - name: last_10_results
+        description: >
+          The results of the team's last 10 games up to that day, oldest first, comma separated
+          (for example W,W,L,OT,W). Null before its first game.
       - name: streak_result
         description: Result of the team's last game up to that day (W, L or OT). Null before its first game.
         data_tests:
