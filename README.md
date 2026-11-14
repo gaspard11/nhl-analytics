@@ -10,6 +10,7 @@ What I have improved since the last full update of this README, on 7 October 202
 
 **In the app (see [Streamlit app](#streamlit-app))**
 
+* **Richer [Standings](#standings).** The same columns as on nhl.com: losses, overtime and shootout losses, points %, home, away and shootout records, the last 10 games as icons, and the current streak.
 * **New [Lead retention](#lead-retention) page.** Which teams turn their time in the lead into points, and which let their leads slip, compared with the league trend.
 * **Game stats.** Opening a game now compares the two teams: shots on goal, faceoffs, power play, penalty minutes, hits, blocked shots, giveaways and takeaways.
 * **Play by play log.** Every event of a game, with filters on the event type, the team and the period.
@@ -24,6 +25,7 @@ What I have improved since the last full update of this README, on 7 October 202
 * **Power play simulator.** `fct_games_pp_segments` is the project's first dbt Python model. It replays each game penalty by penalty with the NHL rules, to cut it into segments of constant strength and to count the official power play opportunities, which the play by play doesn't give.
 * **Strength and net situations.** Each goal and each play now has two separate columns, one for who has more skaters and one for which net is empty, so a power play goal into an empty net keeps both.
 * **Game stats model.** `fct_games_stats` gives each team's stats for each game, and feeds the new stats in the app.
+* **More standings columns.** `fct_league_rankings` now gives each team's losses, overtime and shootout losses, points %, home, away and shootout records, the last 10 games and the current streak, with tests.
 * **Leading time.** `fct_games_leading_segments` cuts each game by who is leading, which gives the time each team spent in the lead for the Lead retention page.
 * **Players from the play by play.** Names, teams and rosters now come from the play by play, so the separate calls to the player API are gone from the DAG.
 * **Player team history.** `nhl_players_team_snapshot` now dates a move to the player's first game with the new team, instead of the day the run noticed it, and its history can be replayed date by date.
@@ -177,7 +179,7 @@ Each team's colour comes from its logo. When the two teams of a game have colour
 
 ### Standings
 
-The standings table on any date, for the whole league, a conference or a division, with the same columns as on nhl.com: games played, points, wins, regulation wins, regulation and overtime wins, goals for, goals against and goal differential. The order comes straight from dbt, with every tie breaker applied, and the rank starts again at 1 inside a conference or a division.
+The standings table on any date, for the whole league, a conference or a division, with the same columns as on nhl.com: games played, wins, regulation losses, overtime and shootout losses, points, points %, regulation wins, regulation and overtime wins, goals for, goals against, goal differential, home, away and shootout records, the last 10 games and the current streak. The last 10 games show as 10 small icons, oldest first: a green check for a win, a grey dash for a loss in overtime or in a shootout, a red cross for a loss in regulation. The order comes straight from dbt, with every tie breaker applied, and the rank starts again at 1 inside a conference or a division.
 
 ### Evolution
 
@@ -185,7 +187,7 @@ Each team's points above .500, game after game: points minus games played, so a 
 
 ### Player stats
 
-Players ranked by points, goals or assists on the chosen date, with their headshot and their team's logo, for the whole league, a conference or a division. The column the table is ranked by is highlighted. The team shown is the player's current team.
+Players ranked by points, goals or assists on the chosen date, with their headshot and their team's logo, for the whole league, a conference or a division. The column the table is ranked by is highlighted. The team shown is the player's current team. A short table, like one division, shows in full, while the whole league scrolls inside the table: a table taller than about 32,000 pixels would show up blank in the browser.
 
 ### Lead retention
 
@@ -212,7 +214,7 @@ dbt/
   README.md                    models, tests and the incremental logic in detail
 app/
   app.py                       entry point and navigation
-  games.py, game_details.py    Games page, and its game details (timeline and goals)
+  games.py, game_details.py    Games page, and its game details (timeline, charts and logs)
   standings.py                 Standings page
   evolution.py                 Evolution page
   player_stats.py              Player stats page
