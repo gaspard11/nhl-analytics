@@ -213,6 +213,15 @@ def load_rankings():
             rankings.goals_for,
             rankings.goals_against,
             rankings.goal_diff,
+            rankings.losses,
+            rankings.ot_losses,
+            rankings.points_pct::float as points_pct,
+            rankings.home_record,
+            rankings.away_record,
+            rankings.shootout_record,
+            rankings.last_10_record,
+            rankings.last_10_results,
+            rankings.streak,
             rankings.tie_rate::float as tie_rate
         from fct_league_rankings as rankings
         inner join dim_teams as teams

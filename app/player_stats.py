@@ -6,6 +6,7 @@ from common import date_picker, group_picker, run_query, season_picker, view_pic
 
 
 ROW_HEIGHT = 70  # pixels, twice Streamlit's default, so the headshots are readable
+MAX_HEIGHT = 2000  # pixels; past this the table scrolls inside itself
 HIGHLIGHT_STYLE = {"background-color": "#e8eefc", "color": "#1f3b8f"}  # the column the table is ranked by
 
 COLUMNS = {
@@ -32,8 +33,9 @@ def players_table(players, metric):
         hide_index=True,
         width="stretch",
         row_height=ROW_HEIGHT,
-        # Header (35px, not affected by row_height) + every row, so the table shows without scrolling
-        height=35 + len(table) * ROW_HEIGHT + 3,
+        # Header (35px, not affected by row_height) + every row, so a short table shows without
+        # scrolling. Capped at MAX_HEIGHT: browsers leave a canvas taller than ~32,767px blank
+        height=min(35 + len(table) * ROW_HEIGHT + 3, MAX_HEIGHT),
     )
 
 
