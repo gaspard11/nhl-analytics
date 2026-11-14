@@ -26,7 +26,7 @@ Each day, teams are ranked on:
 
 Rule 6 is what shapes the models. Criteria 1 to 5 and 7 to 8 are season totals of each team on its own, but head to head can't be computed that way: it only makes sense between the teams that are still tied after rule 5, and it depends on which teams those are on that day. So the standings are built in three steps:
 
-1. `int_league_ranking_pre_tie_breaker` computes every team's totals per day, then gives a `tie_group_id` (macro `nhl_tie_group_id`) to the teams equal on criteria 1 to 5. Teams that aren't tied get none.
+1. `int_league_ranking_pre_tie_breaker` computes every team's totals per day, then gives a `tie_group_id` (macro `nhl_tie_group_id`) to the teams equal on criteria 1 to 5. Teams that aren't tied get none. It also keeps the records the app shows next to the standings: home, away and shootout records, the last 10 games and the current streak.
 2. `int_tied_teams_rate` only looks at those tie groups: for each one, it takes the games played so far between the teams of the group and computes each team's points % in them.
 3. `fct_league_rankings` brings the two together and ranks on all 8 criteria. A team that isn't tied gets a head to head rate of 0, which changes nothing, since rule 6 only separates teams already equal on the first 5.
 
@@ -263,7 +263,11 @@ They are declared in the `_*__models.yml` files, next to the descriptions.
 | | `game_id`, `player_id`, `team_id` | not null |
 | `int_team_game_results` | `game_id` + `team_id` | unique together |
 | | `points` | one of 0, 1, 2 |
+| | `result` | not null, one of `W`, `L`, `OT` |
 | `int_league_ranking_pre_tie_breaker` | `season` + `ranking_date` + `team_id` | unique together |
+| | whole row | wins + regulation losses + OT/SO losses = `games_played`, and the home and away splits add up to those totals |
+| | whole row | the last 10 games add up to 10 (or `games_played` before the 10th game), the streak is never longer than `games_played`, and there is a streak once the team has played |
+| | `streak_result` | one of `W`, `L`, `OT` |
 | `int_tied_teams_rate` | `season` + `ranking_date` + `tie_group_id` + `team_id` | unique together |
 | | `tie_rate` | not null, between 0 and 1 |
 | `int_player_scoring_cumulative` | `season` + `ranking_date` + `player_id` | unique together |
@@ -271,6 +275,9 @@ They are declared in the `_*__models.yml` files, next to the descriptions.
 | `fct_league_rankings` | `season` + `ranking_date` + `team_id` | unique together |
 | | `ranking` | not null, between 1 and 32 |
 | | `team_id` | not null, exists in `dim_teams` |
+| | `losses`, `ot_losses`, `home_record`, `away_record`, `shootout_record`, `last_10_record` | not null |
+| | `points_pct` | between 0 and 1 |
+| | `streak` | a result and a number of games, like `W2`, `L1` or `OT1` (when not null) |
 | `fct_player_goals_rankings`, `fct_player_assists_rankings`, `fct_player_points_rankings` | `season` + `ranking_date` + `player_id` | unique together |
 | | `ranking` | not null |
 | `fct_games` | `game_id` | unique, not null |
@@ -301,12 +308,12 @@ They are in `tests/`. Each one returns the rows that break its rule, so a passin
 
 | Test | Model checked | Rule |
 |---|---|---|
-| `assert_standings_match_recomputation` | `fct_league_rankings` | On the latest day of each season, every team's `games_played`, `points`, `total_wins`, `regulation_wins`, `regulation_ot_wins`, `goals_for` and `goals_against` equal the same totals recomputed from scratch from `int_team_game_results`. Catches a day counted twice or skipped by the incremental runs |
+| `assert_standings_match_recomputation` | `fct_league_rankings` | On the latest day of each season, every team's `games_played`, `points`, `total_wins`, `regulation_wins`, `regulation_ot_wins`, `goals_for`, `goals_against`, `losses` and `ot_losses` equal the same totals recomputed from scratch from `int_team_game_results`. Catches a day counted twice or skipped by the incremental runs |
 | `assert_player_totals_match_recomputation` | `int_player_scoring_cumulative` | On the latest day of each season, every player's `number_of_goals` and `number_of_assists` equal a count from scratch over `stg_nhl_api__goals` (scorer, first assist, second assist) |
 | `assert_team_totals_never_decrease` | `fct_league_rankings` | Within a season, none of `games_played`, `points`, `total_wins`, `regulation_wins`, `regulation_ot_wins`, `goals_for`, `goals_against` is lower than on the team's previous day. Catches a day replaced with older data |
 | `assert_player_totals_never_decrease` | `int_player_scoring_cumulative` | Within a season, `number_of_goals` and `number_of_assists` are never lower than on the player's previous day |
 | `assert_every_game_date_has_standings` | `fct_league_rankings` | Every `game_date` of `stg_nhl_api__games` has standings for that season and date. Catches a day loaded into raw but never processed |
 | `assert_every_ranking_date_is_complete` | `fct_league_rankings` | Every day has as many teams as the `nhl_teams` seed (32), and the best `ranking` is 1 once at least one game has been played (on day 0 every team is ranked last) |
-| `assert_team_record_is_consistent` | `fct_league_rankings` | For every team and day: `total_wins` ≤ `games_played`, `regulation_wins` ≤ `regulation_ot_wins` ≤ `total_wins`, `points` ≥ 2 × `total_wins`, `points` − 2 × `total_wins` ≤ losses (each loss is worth at most 1 point), and `goal_diff` = `goals_for` − `goals_against` |
+| `assert_team_record_is_consistent` | `fct_league_rankings` | For every team and day: `total_wins` ≤ `games_played`, `regulation_wins` ≤ `regulation_ot_wins` ≤ `total_wins`, `points` ≥ 2 × `total_wins`, `points` − 2 × `total_wins` ≤ losses (each loss is worth at most 1 point), `total_wins` + `losses` + `ot_losses` = `games_played` (every game is a win, a regulation loss or an OT/SO loss), and `goal_diff` = `goals_for` − `goals_against` |
 | `assert_league_totals_balance` | `fct_league_rankings` | For the whole league on every day: 2 × the sum of `total_wins` = the sum of `games_played` (one winner per game, two teams per game), and the sum of `goals_for` = the sum of `goals_against`. Catches a game counted for only one of its two teams |
 | `assert_pbp_goals_match_final_score` | `stg_nhl_api__goals` | For every finished game, the number of goals in the play by play equals `home_team_score` + `away_team_score`, minus 1 for a game decided in a shootout (the final score gives the shootout winner one goal, but shootout goals are not in the play by play). Catches a play by play loaded before the end of the game, or never loaded |
