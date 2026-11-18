@@ -1,7 +1,8 @@
 """Daily NHL load.
 
-Fetches the finished regular season games of one date from the NHL API, appends the raw JSON
-to NHL_RAW.RAW in Snowflake, then runs the dbt Cloud production job that builds the marts.
+Fetches the finished regular season games of one date from the NHL API, with the play-by-play
+and the shift chart of each game, appends the raw JSON to NHL_RAW.RAW in Snowflake, then runs
+the dbt Cloud production job that builds the marts.
 All the API calls come first and the inserts at the end, so the warehouse only wakes up briefly.
 
 Scheduled runs load the previous day and the day before, to include the games that were not finished. Any date can be (re)loaded by triggering the DAG with
@@ -95,9 +96,22 @@ def nhl_raw_pipeline():
         response.raise_for_status()
         return response.json()
 
+    @task
+    def extract_game_shifts(game_id: int):
+        response = requests.get(f"https://api.nhle.com/stats/rest/en/shiftcharts?cayenneExp=gameId={game_id}")
+        response.raise_for_status()
+        return response.json()
+
     @task(trigger_rule="none_failed")
     def load_game_pbp_to_snowflake(payload: dict):
         insert_raw_payload("GAMES_PBP_RAW", payload)
+
+    @task(trigger_rule="none_failed")
+    def load_game_shifts_to_snowflake(payload: dict):
+        # The shift chart can be published after the game is final: an empty payload is not
+        # loaded, the next day's run (which reloads the day before) picks it up
+        if payload.get("data"):
+            insert_raw_payload("GAMES_SHIFTS_RAW", payload)
 
     @task.branch(trigger_rule="none_failed")
     def check_has_games(payloads: list):
@@ -142,15 +156,17 @@ def nhl_raw_pipeline():
 
     game_ids = extract_game_ids(games_payloads)
     game_pbp_payloads = extract_game_pbp.expand(game_id=game_ids)
+    game_shifts_payloads = extract_game_shifts.expand(game_id=game_ids)
 
     load_games = load_games_to_snowflake.expand(payload=games_payloads)
     load_game_pbp = load_game_pbp_to_snowflake.expand(payload=game_pbp_payloads)
+    load_game_shifts = load_game_shifts_to_snowflake.expand(payload=game_shifts_payloads)
 
     branch = check_has_games(games_payloads)
-    # Inserts wait for the last API call. none_failed on the loads: a day without games skips
-    # extract_game_pbp, which must not skip the games insert
-    game_pbp_payloads >> load_games
-    [load_games, load_game_pbp] >> branch
+    # Inserts wait for the last API calls. none_failed on the loads: a day without games skips
+    # extract_game_pbp and extract_game_shifts, which must not skip the games insert
+    [game_pbp_payloads, game_shifts_payloads] >> load_games
+    [load_games, load_game_pbp, load_game_shifts] >> branch
     branch >> [run_dbt, skip_dbt] >> stop_vm()
 
 
