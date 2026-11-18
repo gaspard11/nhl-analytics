@@ -5,7 +5,7 @@
 select
     game_id,
     team_id,
-    played_id,
+    player_id,
     shift_number,
     period,
     shift_id,
