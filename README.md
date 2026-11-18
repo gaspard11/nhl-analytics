@@ -112,8 +112,8 @@ A normal day:
 The DAG lives in [`airflow/dags/nhl_pipeline.py`](airflow/dags/nhl_pipeline.py). Each run:
 
 1. Calls the NHL stats API for the finished regular season games of each date to load (one mapped task per date).
-2. Fetches the play by play of every game (one mapped task per game).
-3. Loads everything into `NHL_RAW.RAW`: `GAMES_RAW` and `GAMES_PBP_RAW`. The play by play also holds each game's rosters, which is where the player names and teams come from. The inserts only start once all the API calls are done, so the warehouse is up for a few seconds.
+2. Fetches the play by play and the shift chart of every game (one mapped task per game).
+3. Loads everything into `NHL_RAW.RAW`: `GAMES_RAW`, `GAMES_PBP_RAW` and `GAMES_SHIFTS_RAW`. The play by play also holds each game's rosters, which is where the player names and teams come from. The inserts only start once all the API calls are done, so the warehouse is up for a few seconds.
 4. Triggers the dbt Cloud production job and waits for it to finish. On a day without games, dbt is skipped.
 5. Stops the VM it runs on.
 
