@@ -10,3 +10,5 @@ sources:
         description: One NHL stats API payload (all regular-season games of one date) per load.
       - name: GAMES_PBP_RAW
         description: One play-by-play payload (one game) per load.
+      - name: GAMES_SHIFTS_RAW
+        description: One game shift payload (one game) per load
