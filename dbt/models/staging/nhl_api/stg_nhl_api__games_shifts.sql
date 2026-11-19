@@ -4,7 +4,7 @@ with source as (
         raw_payload,
         fetched_at
     from {{ source('nhl_raw', 'GAMES_SHIFTS_RAW') }}
-
+    qualify row_number() over (partition by raw_payload:id::int order by fetched_at desc) = 1
 )
 
 
