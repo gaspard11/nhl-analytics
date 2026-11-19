@@ -106,8 +106,9 @@ models:
       Season-to-date stats per skater (every player but the goalies), for every game date from the
       skater's first game of the season. Cumulative state table (incremental, delete+insert on
       season, ranking_date): each run reads every skater's last row before the new data and recomputes
-      the days from there, from the per-game stats of int_player_game_stats. Computed stats (points)
-      are computed on each row from the totals. No ranking: the app sorts on the stat it shows.
+      the days from there, from the per-game stats of int_player_game_stats (common to every player)
+      and int_skater_game_stats (skater only). Computed stats (points) are computed on each row from the
+      totals. No ranking: the app sorts on the stat it shows.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -115,6 +116,13 @@ models:
       - dbt_utils.expression_is_true:
           arguments:
             expression: "points = goals + assists and toi_seconds <= games_played * 3900"
+      # The splits add up: every goal is EV, PP, SH or a penalty shot, every assist EV, PP or SH
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              ev_goals + pp_goals + sh_goals + ps_goals = goals
+              and ev_assists + pp_assists + sh_assists = assists
+              and shots >= goals
     columns:
       - name: ranking_date
         description: "{{ doc('ranking_date') }}"
@@ -140,6 +148,28 @@ models:
         description: Season-to-date goals, shootout goals excluded.
       - name: assists
         description: Season-to-date assists (first and second assists both count).
+      - name: penalty_minutes
+        description: Season-to-date penalty minutes.
+      - name: shots
+        description: Season-to-date shots on goal, shootout excluded.
+      - name: ev_goals
+        description: Season-to-date even strength goals.
+      - name: ev_assists
+        description: Season-to-date even strength assists.
+      - name: pp_goals
+        description: Season-to-date power play goals.
+      - name: pp_assists
+        description: Season-to-date power play assists.
+      - name: sh_goals
+        description: Season-to-date short handed goals.
+      - name: sh_assists
+        description: Season-to-date short handed assists.
+      - name: ps_goals
+        description: Season-to-date penalty shot goals.
+      - name: plus_minus
+        description: >
+          Season-to-date +/-: +1 for each even strength or short handed goal of the team with the skater
+          on the ice, -1 for each one of the other team. Can be negative.
       - name: points
         description: Season-to-date points = goals + assists. Computed from the totals.
       - name: _source_fetched_at
@@ -165,6 +195,8 @@ models:
               shots_against = goals_against + saves
               and shutouts <= games_played
               and toi_seconds <= games_played * 3900
+              and games_started <= games_played
+              and awarded_wins + awarded_losses + awarded_ot_losses <= games_played
     columns:
       - name: ranking_date
         description: "{{ doc('ranking_date') }}"
@@ -198,6 +230,19 @@ models:
         description: >
           Season-to-date shutouts: games where the goalie was the only one used by their team and the
           team allowed no goal, shootout excluded.
+      - name: penalty_minutes
+        description: Season-to-date penalty minutes.
+      - name: games_started
+        description: Season-to-date games started (in net at the opening faceoff).
+      - name: awarded_wins
+        description: >
+          Season-to-date wins credited to the goalie: the goalie of record of the winning team, the one
+          whose latest shift started before the game-winning goal (before the end of overtime for a
+          shootout).
+      - name: awarded_losses
+        description: Season-to-date losses in regulation credited to the goalie, with the same goalie of record rule.
+      - name: awarded_ot_losses
+        description: Season-to-date losses in overtime or in a shootout credited to the goalie.
       - name: shots_against
         description: goals_against + saves. Computed from the totals.
       - name: gaa
@@ -274,7 +319,8 @@ models:
   - name: fct_goals
     description: >
       One row per goal of a finished game, shootout goals excluded, with the situation of the goal
-      (power play, short handed, empty net, penalty shot, even strength).
+      (power play, short handed, empty net, penalty shot, even strength). A copy of int_goals_situations,
+      where the situation is worked out, kept as a table for the app.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:

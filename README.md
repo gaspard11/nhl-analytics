@@ -33,7 +33,7 @@ What I have improved since the last full update of this README, on 7 October 202
 * **More robust daily load.** The DAG now loads the last two days instead of one, so a game that was not finished at the previous run is picked up.
 * **Shifts.** The DAG now also loads each game's shift chart: every shift of every player, in `fct_games_shifts`.
 * **Goalie stats.** `fct_goalie_stats` gives each goalie's season to date games, time on ice, goals against, saves, shutouts, goals against average and save percentage, for every day. The time on ice comes from the shifts, the rest from the play by play.
-* **One architecture for the player stats.** Per-game stats in three families (common to every player, skater only, goalie only), and season to date totals in `fct_skater_stats` and `fct_goalie_stats`, which replace the three player ranking tables. The ranking is a simple sort, so the app does it. Skaters now also have their games played and time on ice.
+* **One architecture for the player stats.** Per-game stats in three families (common to every player, skater only, goalie only), and season to date totals in `fct_skater_stats` and `fct_goalie_stats`, which replace the three player ranking tables. The ranking is a simple sort, so the app does it. Skaters now also have their games played, time on ice, penalty minutes, shots, even strength / power play / short handed goals and assists and +/-, and goalies their games started and their wins, losses and OT losses, credited with the NHL's game-winning goal rule.
 * **Past shifts from the HTML reports.** The NHL shift API missed a week of games, recorded some shifts twice and put other teams' shifts into a game. A one-off DAG reloaded every past game from the NHL's HTML time on ice reports instead, which match the official time on ice, in the same format as the API. New tests flag those problems if the API repeats them.
 * **More tests and documentation.** The new play by play, roster, shift and goalie models have tests, and their columns are described.
 
@@ -157,7 +157,7 @@ Airflow, dbt and the app each have their own Snowflake user, and they all share 
 The dbt project is in [`dbt/`](dbt) and runs in dbt Cloud. It goes from raw JSON to:
 
 * `fct_league_rankings`: the standings of every team on every day of the season, with all the NHL tie breakers, including head to head results between tied teams.
-* `fct_skater_stats`, `fct_goalie_stats`: the season to date stats of every skater (games played, time on ice, goals, assists, points) and every goalie (games, time on ice, goals against, saves, shutouts, goals against average, save percentage), per day.
+* `fct_skater_stats`, `fct_goalie_stats`: the season to date stats of every skater (games played, time on ice, goals, assists, points, penalty minutes, shots, even strength / power play / short handed splits, +/-) and every goalie (games played and started, time on ice, goals against, saves, shutouts, wins, losses, OT losses, goals against average, save percentage), per day.
 * `fct_games_stats`: each team's stats for each game (shots, faceoffs, hits, power play...).
 * `fct_games_pp_segments`: every game cut into segments of constant strength, with the official power play opportunities. This one is a Python model, because it has to replay the penalty box event by event.
 * `fct_games_leading_segments`: every game cut into stretches with the same team leading, or tied.
