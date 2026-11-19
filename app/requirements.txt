@@ -3,3 +3,4 @@ snowflake-connector-python[pandas]
 altair
 pandas
 cryptography
+streamlit-aggrid==1.2.1.post2
