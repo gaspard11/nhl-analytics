@@ -10,7 +10,8 @@ from sortable_table import NUMBER_COLUMN, TEXT_COLUMN, UNSORTABLE, image_column,
 
 ROW_HEIGHT = 70  # pixels, twice Streamlit's default, so the headshots are readable
 
-# Goalie values as nhl.com shows them: time on ice 1234:56, save % .915, GAA 2.47
+# Values as nhl.com shows them: time on ice 1234:56 (or 21:34 per game), save % .915, GAA 2.47,
+# shooting % 12.5
 TOI_FORMAT = JsCode("""
 function(params) {
     if (params.value == null) return '';
@@ -20,6 +21,11 @@ function(params) {
 """)
 SAVE_PCT_FORMAT = JsCode("function(params) { return params.value == null ? '' : params.value.toFixed(3).replace(/^0/, ''); }")
 GAA_FORMAT = JsCode("function(params) { return params.value == null ? '' : params.value.toFixed(2); }")
+SHOOTING_PCT_FORMAT = JsCode("function(params) { return params.value == null ? '' : (100 * params.value).toFixed(1); }")
+PLUS_MINUS_FORMAT = JsCode("function(params) { return params.value > 0 ? '+' + params.value : String(params.value); }")
+
+# Narrower than the default number column, so the 15 skater stats fit on a laptop screen
+STAT_COLUMN = {**NUMBER_COLUMN, "minWidth": 58}
 
 PLAYER_COLUMN_DEFS = [
     {"field": "RANK", "headerName": "Rank", "type": "numericColumn", "width": 70, **UNSORTABLE,
@@ -30,24 +36,48 @@ PLAYER_COLUMN_DEFS = [
     {"field": "TEAM", "headerName": "Team", "headerTooltip": "The player's current team", **TEXT_COLUMN},
 ]
 
+# The columns of nhl.com's skater summary, this season up to the chosen date
 SKATER_COLUMN_DEFS = PLAYER_COLUMN_DEFS + [
-    {"field": "POINTS", "headerName": "Points", "headerTooltip": "Goals + assists this season, up to the chosen date",
-     "sort": "desc", **NUMBER_COLUMN},  # sorted by points to start with
-    {"field": "GOALS", "headerName": "Goals", "headerTooltip": "Goals this season, shootout goals excluded", **NUMBER_COLUMN},
-    {"field": "ASSISTS", "headerName": "Assists", "headerTooltip": "Assists this season, first and second assists", **NUMBER_COLUMN},
+    {"field": "GAMES_PLAYED", "headerName": "GP", "headerTooltip": "Games played: games with at least one shift", **STAT_COLUMN},
+    {"field": "GOALS", "headerName": "G", "headerTooltip": "Goals, shootout goals excluded", **STAT_COLUMN},
+    {"field": "ASSISTS", "headerName": "A", "headerTooltip": "Assists, first and second", **STAT_COLUMN},
+    {"field": "POINTS", "headerName": "P", "headerTooltip": "Points: goals + assists",
+     "sort": "desc", **STAT_COLUMN},  # sorted by points to start with
+    {"field": "PLUS_MINUS", "headerName": "+/-",
+     "headerTooltip": "Plus/minus: +1 for each even strength or short handed goal of the team with the skater on the ice, -1 for each one against",
+     "valueFormatter": PLUS_MINUS_FORMAT, **STAT_COLUMN},
+    {"field": "PENALTY_MINUTES", "headerName": "PIM", "headerTooltip": "Penalty minutes", **STAT_COLUMN},
+    {"field": "EV_GOALS", "headerName": "EVG", "headerTooltip": "Even strength goals", **STAT_COLUMN},
+    {"field": "EV_POINTS", "headerName": "EVP", "headerTooltip": "Even strength points: goals + assists", **STAT_COLUMN},
+    {"field": "PP_GOALS", "headerName": "PPG", "headerTooltip": "Power play goals", **STAT_COLUMN},
+    {"field": "PP_POINTS", "headerName": "PPP", "headerTooltip": "Power play points: goals + assists", **STAT_COLUMN},
+    {"field": "SH_GOALS", "headerName": "SHG", "headerTooltip": "Short handed goals", **STAT_COLUMN},
+    {"field": "SH_POINTS", "headerName": "SHP", "headerTooltip": "Short handed points: goals + assists", **STAT_COLUMN},
+    {"field": "SHOTS", "headerName": "S", "headerTooltip": "Shots on goal, shootout excluded", **STAT_COLUMN},
+    {"field": "SHOOTING_PCT", "headerName": "S%", "headerTooltip": "Shooting percentage: goals / shots",
+     "valueFormatter": SHOOTING_PCT_FORMAT, **STAT_COLUMN},
+    {"field": "TOI_PER_GAME", "headerName": "TOI/GP", "headerTooltip": "Average time on ice per game, minutes:seconds",
+     "valueFormatter": TOI_FORMAT, **STAT_COLUMN, "minWidth": 72},
 ]
 
+# The columns of nhl.com's goalie summary, this season up to the chosen date
 GOALIE_COLUMN_DEFS = PLAYER_COLUMN_DEFS + [
-    {"field": "GAMES_PLAYED", "headerName": "GP", "headerTooltip": "Games played: games with at least one shift", **NUMBER_COLUMN},
-    {"field": "TOI_SECONDS", "headerName": "TOI", "headerTooltip": "Time on ice, minutes:seconds", "valueFormatter": TOI_FORMAT, **NUMBER_COLUMN},
-    {"field": "SHOTS_AGAINST", "headerName": "SA", "headerTooltip": "Shots against: saves + goals against", **NUMBER_COLUMN},
-    {"field": "SAVES", "headerName": "Saves", "headerTooltip": "Shots on goal stopped, shootout excluded", **NUMBER_COLUMN},
-    {"field": "GOALS_AGAINST", "headerName": "GA", "headerTooltip": "Goals against, shootout and empty net goals excluded", **NUMBER_COLUMN},
-    {"field": "SAVE_PCT", "headerName": "SV%", "headerTooltip": "Save percentage: saves / shots against", "valueFormatter": SAVE_PCT_FORMAT, **NUMBER_COLUMN},
+    {"field": "GAMES_PLAYED", "headerName": "GP", "headerTooltip": "Games played: games with at least one shift", **STAT_COLUMN},
+    {"field": "GAMES_STARTED", "headerName": "GS", "headerTooltip": "Games started: in net at the opening faceoff", **STAT_COLUMN},
+    {"field": "AWARDED_WINS", "headerName": "W",
+     "headerTooltip": "Wins: the goalie in net when the team scored the goal that put it ahead for good", **STAT_COLUMN},
+    {"field": "AWARDED_LOSSES", "headerName": "L", "headerTooltip": "Losses in regulation", **STAT_COLUMN},
+    {"field": "AWARDED_OT_LOSSES", "headerName": "OT", "headerTooltip": "Losses in overtime or in a shootout", **STAT_COLUMN},
+    {"field": "SHOTS_AGAINST", "headerName": "SA", "headerTooltip": "Shots against: saves + goals against", **STAT_COLUMN},
+    {"field": "SAVES", "headerName": "Svs", "headerTooltip": "Saves: shots on goal stopped, shootout excluded", **STAT_COLUMN},
+    {"field": "GOALS_AGAINST", "headerName": "GA", "headerTooltip": "Goals against, shootout and empty net goals excluded", **STAT_COLUMN},
+    {"field": "SAVE_PCT", "headerName": "SV%", "headerTooltip": "Save percentage: saves / shots against", "valueFormatter": SAVE_PCT_FORMAT, **STAT_COLUMN},
     # Sorted by GAA to start with, lowest first
     {"field": "GAA", "headerName": "GAA", "headerTooltip": "Goals against average: goals against per 60 minutes", "valueFormatter": GAA_FORMAT,
-     **NUMBER_COLUMN, "sortingOrder": ["asc", "desc"], "sort": "asc"},
-    {"field": "SHUTOUTS", "headerName": "SO", "headerTooltip": "Shutouts: full games without a goal against, shootout excluded", **NUMBER_COLUMN},
+     **STAT_COLUMN, "sortingOrder": ["asc", "desc"], "sort": "asc"},
+    {"field": "SHUTOUTS", "headerName": "SO", "headerTooltip": "Shutouts: full games without a goal against, shootout excluded", **STAT_COLUMN},
+    {"field": "TOI_SECONDS", "headerName": "TOI", "headerTooltip": "Time on ice this season, minutes:seconds",
+     "valueFormatter": TOI_FORMAT, **STAT_COLUMN, "minWidth": 80},
 ]
 
 
@@ -76,9 +106,22 @@ def load_skaters():
         f"""
     select
         {PLAYER_SELECT}
-        stats.points,
+        stats.games_played,
         stats.goals,
-        stats.assists
+        stats.assists,
+        stats.points,
+        stats.plus_minus,
+        stats.penalty_minutes,
+        stats.ev_goals,
+        stats.ev_goals + stats.ev_assists                       as ev_points,
+        stats.pp_goals,
+        stats.pp_goals + stats.pp_assists                       as pp_points,
+        stats.sh_goals,
+        stats.sh_goals + stats.sh_assists                       as sh_points,
+        stats.shots,
+        -- ::float: Snowflake decimals would come back as Python Decimal objects, sorted as text
+        (stats.goals / nullif(stats.shots, 0))::float           as shooting_pct,
+        (stats.toi_seconds / stats.games_played)::float         as toi_per_game
     from nhl_analytics.marts.fct_skater_stats as stats
     {PLAYER_JOINS}
     """
@@ -91,6 +134,10 @@ def load_goalies():
     select
         {PLAYER_SELECT}
         stats.games_played,
+        stats.games_started,
+        stats.awarded_wins,
+        stats.awarded_losses,
+        stats.awarded_ot_losses,
         stats.toi_seconds,
         stats.shots_against,
         stats.saves,
