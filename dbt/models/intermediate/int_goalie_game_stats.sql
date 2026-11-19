@@ -1,4 +1,7 @@
-
+-- Goalie-only stats, per game: one row per game, goalie and stat (long format). A new stat is one
+-- more block in the union all. A goalie with no row for a stat had none of it.
+-- Stats common to every player (games played, time on ice, goals, assists) are in
+-- int_player_game_stats. Season-to-date totals and computed stats (GAA, save %) are in fct_goalie_stats.
 
 with game_fetched_at as (
     select
@@ -16,41 +19,32 @@ with game_fetched_at as (
         on shifts.game_id = games.game_id
 ),
 
-goalie_shifts as (
+-- The goalies who played each game (at least one shift), with how many goalies their team used:
+-- a shutout only goes to a goalie who played the whole game alone
+goalies_played as (
     select
         s.game_id,
         s.player_id,
         s.team_id,
-        split_part(s.duration, ':', 1)::int * 60 + split_part(s.duration, ':', 2)::int as duration_seconds
+        count(distinct s.player_id) over (partition by s.game_id, s.team_id) as c_goalies
     from {{ ref('stg_nhl_api__games_shifts') }} s
     join {{ ref('dim_players') }} p on s.player_id = p.player_id
     where p.position = 'G'
-),
-
-goalie_tois as (
-    select
-        game_id,
-        player_id,
-        team_id,
-        sum(duration_seconds) as toi_seconds,
-        COUNT(distinct player_id) over (partition by game_id, team_id) as c_goalies
-    from goalie_shifts
-    group by team_id, game_id, player_id
+    group by s.game_id, s.player_id, s.team_id
 ),
 
 shutouts_awarded_games as (
     select
         g.game_id,
-        player_id
-    from goalie_tois g
+        g.player_id
+    from goalies_played g
     join {{ ref('int_team_game_results') }} ga on g.team_id = ga.team_id and g.game_id = ga.game_id
     where c_goalies = 1
     and (
         ga.goals_against = 0
         or (ga.last_period_type = 'SO' and ga.goals_for = 0)
     )
-    ),
-
+),
 
 goal_against_per_game as (
     select
@@ -72,12 +66,17 @@ saves_per_game as (
     group by game_id, goalie_in_net_id
 ),
 
+-- TODO games_started: the goalie in net at the start of the game (their first shift starts at
+-- 00:00 of period 1). One CTE here, then one block in the union all below.
+
+-- TODO wins_awarded, losses_awarded, ot_awarded: the decision goes to the goalie in net when the
+-- winning team scored the goal that put it ahead for good (goalie_in_net_id of the opponent's
+-- goals in stg_nhl_api__pbp, the result in int_team_game_results). One CTE per decision or one CTE
+-- with the three, then their blocks in the union all below.
+
 stats as (
 
-    select game_id, player_id, 'toi_seconds' as stat_name, toi_seconds as stat_value
-    from goalie_tois
-    union all
-    select game_id, player_id, 'saves', count_saves
+    select game_id, player_id, 'saves' as stat_name, count_saves as stat_value
     from saves_per_game
     union all
     select game_id, player_id, 'goals_against', count_goals_against
@@ -85,6 +84,7 @@ stats as (
     union all
     select game_id, player_id, 'shutout', 1
     from shutouts_awarded_games
+    -- TODO union all: games_started, wins_awarded, losses_awarded, ot_awarded
 
 )
 

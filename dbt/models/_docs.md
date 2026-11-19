@@ -3,7 +3,7 @@ NHL season as an 8-digit integer: start year followed by end year, e.g. `2025202
 {% enddocs %}
 
 {% docs ranking_date %}
-Date the standings or rankings are computed for, including that day's games.
+Date the standings, rankings or season-to-date stats are computed for, including that day's games.
 There is one ranking date per day with at least one finished game. For team standings, there is also
 day 0: the day before a season's first game, where every total is 0.
 {% enddocs %}
@@ -42,9 +42,4 @@ Used as the watermark by incremental models to find new or reloaded data.
 {% docs batch_loaded_at %}
 Technical column: when the dbt run that (re)computed this row happened.
 Downstream incremental models use it to pick up exactly the rows recomputed since their last run.
-{% enddocs %}
-
-{% docs player_ranking %}
-Rank among all players that day, computed with `rank()`: players with the same total share a rank,
-and the next rank is skipped (1, 2, 2, 4…).
 {% enddocs %}

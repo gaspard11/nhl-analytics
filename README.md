@@ -1,6 +1,6 @@
 # NHL Analytics
 
-A daily data pipeline for the NHL regular season. Every morning it fetches the last two days of games from the NHL API, loads the raw JSON into Snowflake, turns it into standings and player rankings with dbt, and shows the results in a Streamlit app.
+A daily data pipeline for the NHL regular season. Every morning it fetches the last two days of games from the NHL API, loads the raw JSON into Snowflake, turns it into standings and player stats with dbt, and shows the results in a Streamlit app.
 
 The final app lives here: [https://nhl-app.streamlit.app/](https://nhl-app.streamlit.app/)
 
@@ -18,6 +18,7 @@ What I have improved since the last full update of this README, on 7 October 202
 * **Team colours.** When two teams have colours that are too close, the away team switches to its secondary colour, so the charts of a game stay readable.
 * **Faster Games page.** It starts with the last 7 days and has a Load more button, it only builds the details of the games that are open, and it prepares its data once a day instead of on every visit.
 * **Clearer game cards.** They now read away @ home, with `OT` or `SO` next to the winner's score.
+* **Player stats fix.** The page used to join three ranking tables, and a player with points but no goal, or no assist, was left out. It now reads a single table of skater stats.
 
 **In the data (see the [dbt README](dbt/README.md))**
 
@@ -30,7 +31,11 @@ What I have improved since the last full update of this README, on 7 October 202
 * **Players from the play by play.** Names, teams and rosters now come from the play by play, so the separate calls to the player API are gone from the DAG.
 * **Player team history.** `nhl_players_team_snapshot` now dates a move to the player's first game with the new team, instead of the day the run noticed it, and its history can be replayed date by date.
 * **More robust daily load.** The DAG now loads the last two days instead of one, so a game that was not finished at the previous run is picked up.
-* **More tests and documentation.** The new play by play and roster models have tests, and their columns are described.
+* **Shifts.** The DAG now also loads each game's shift chart: every shift of every player, in `fct_games_shifts`.
+* **Goalie stats.** `fct_goalie_stats` gives each goalie's season to date games, time on ice, goals against, saves, shutouts, goals against average and save percentage, for every day. The time on ice comes from the shifts, the rest from the play by play.
+* **One architecture for the player stats.** Per-game stats in three families (common to every player, skater only, goalie only), and season to date totals in `fct_skater_stats` and `fct_goalie_stats`, which replace the three player ranking tables. The ranking is a simple sort, so the app does it. Skaters now also have their games played and time on ice.
+* **Past shifts from the HTML reports.** The NHL shift API missed a week of games, recorded some shifts twice and put other teams' shifts into a game. A one-off DAG reloaded every past game from the NHL's HTML time on ice reports instead, which match the official time on ice, in the same format as the API. New tests flag those problems if the API repeats them.
+* **More tests and documentation.** The new play by play, roster, shift and goalie models have tests, and their columns are described.
 
 ## Why this project exists
 
@@ -90,7 +95,7 @@ NHL API
 Snowflake  NHL_RAW.RAW          raw JSON, append only
    │   (dbt Cloud production job, triggered by Airflow)
    ▼
-Snowflake  NHL_ANALYTICS.MARTS  standings, games, play by play, game stats, player rankings, team travel
+Snowflake  NHL_ANALYTICS.MARTS  standings, games, play by play, shifts, game stats, skater and goalie stats, team travel
    │
    ▼
 Streamlit app                   games, standings, evolution, player stats, lead retention
@@ -118,6 +123,10 @@ The DAG lives in [`airflow/dags/nhl_pipeline.py`](airflow/dags/nhl_pipeline.py).
 5. Stops the VM it runs on.
 
 The DAG takes the date to load as a parameter. Scheduled runs load the day before, plus the day before that again, so a game that was not finished at the previous run is picked up. A run triggered with a date loads only that date, so any past date can be loaded again, which is how I backfilled earlier games. Loading the same date twice does no harm, because dbt staging models only keep the latest load of each game.
+
+The NHL sometimes publishes a shift chart a while after the game ends. An empty shift chart isn't loaded, and since every run reloads the day before, it is picked up the next morning.
+
+The past shifts were loaded by a one-off DAG, `backfill_shifts_from_html`, from the NHL's HTML time on ice reports rather than from the API, which had missing, duplicated and misplaced shifts (see the [dbt README](dbt/README.md#shifts-fct_games_shifts)). It is started by hand and only loads the games missing from `GAMES_SHIFTS_RAW`, so it also repairs a game the API got wrong: delete that game's rows, then trigger it.
 
 Snowflake and dbt Cloud are reached through two Airflow connections (`snowflake_conn_25` and `dbt_conn_gas25`), created on the VM and not stored in the repo.
 
@@ -148,13 +157,13 @@ Airflow, dbt and the app each have their own Snowflake user, and they all share 
 The dbt project is in [`dbt/`](dbt) and runs in dbt Cloud. It goes from raw JSON to:
 
 * `fct_league_rankings`: the standings of every team on every day of the season, with all the NHL tie breakers, including head to head results between tied teams.
-* `fct_player_goals_rankings`, `fct_player_assists_rankings`, `fct_player_points_rankings`: player rankings per day.
+* `fct_skater_stats`, `fct_goalie_stats`: the season to date stats of every skater (games played, time on ice, goals, assists, points) and every goalie (games, time on ice, goals against, saves, shutouts, goals against average, save percentage), per day.
 * `fct_games_stats`: each team's stats for each game (shots, faceoffs, hits, power play...).
 * `fct_games_pp_segments`: every game cut into segments of constant strength, with the official power play opportunities. This one is a Python model, because it has to replay the penalty box event by event.
 * `fct_games_leading_segments`: every game cut into stretches with the same team leading, or tied.
-* `fct_games`, `fct_goals`, `fct_games_events`, `fct_game_rosters`, `dim_players`, `dim_teams`, `fct_team_travel`.
+* `fct_games`, `fct_goals`, `fct_games_events`, `fct_game_rosters`, `fct_games_shifts`, `dim_players`, `dim_teams`, `fct_team_travel`.
 
-The standings are cumulative and incremental: each run reads the state of the day before the new data and recomputes only the days that changed, instead of the whole season. Singular tests check that these running totals always match a full recomputation from raw.
+The standings and the skater and goalie stats are cumulative and incremental: each run reads the state of the day before the new data and recomputes only the days that changed, instead of the whole season. Singular tests check that these running totals always match a full recomputation from raw.
 
 Models, tests and the incremental logic are documented in [`dbt/README.md`](dbt/README.md).
 
@@ -204,6 +213,8 @@ The data only changes once a day, so query results are cached until 08:00 UTC, a
 ```
 airflow/
   dags/nhl_pipeline.py         the daily DAG
+  dags/backfill_shifts_from_html.py
+                               one-off load of the past shifts, from the HTML reports
   Dockerfile                   Airflow image with the Snowflake and dbt Cloud providers
   docker-compose.yaml          local Airflow (CeleryExecutor)
   docker-compose.vm.yaml       Airflow on the GCP VM (LocalExecutor)
@@ -234,6 +245,7 @@ Secrets are kept out of the repo: the `.env` file, the Snowflake private keys, `
 There is so much to do in terms of visualisation that this could go on forever. Some ideas for what comes next:
 
 * Team travel. The dbt model is already there (`fct_team_travel`): for every game, the arena a team comes from, the arena it plays in and the distance between the two. The next step is a page in the app with a map of each team's trips over the season, and a comparison of the teams: who travels the most, where, and whether the teams that travel more get worse results.
-* More advanced player stats.
+* Goalies in the app. The stats are already in `fct_goalie_stats`, the app doesn't show them yet. Wins and losses aren't there either: the NHL gives the decision to the goalie in net when the winning team takes the lead for good, which needs its own model.
+* More advanced player stats, such as time on ice for skaters, which the shifts now make possible.
 * Visualisations built from the puck coordinates given for each event, such as shot maps.
 * Machine learning to predict results, as [MoneyPuck](https://moneypuck.com) does.

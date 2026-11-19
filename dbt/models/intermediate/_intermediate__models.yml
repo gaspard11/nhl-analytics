@@ -119,17 +119,100 @@ models:
                 min_value: 0
                 max_value: 1
 
-  - name: int_player_scoring_cumulative
+  # Per-game player stats, long format: one row per game, player and stat. Season-to-date totals
+  # are in the marts fct_skater_stats and fct_goalie_stats. int_skater_game_stats (skater-only
+  # stats) is disabled until its first stat is written; its tests go here once it is enabled.
+
+  - name: int_player_game_stats
     description: >
-      Cumulative state table (incremental): season-to-date goals and assists per player for every
-      game date, from the player's first point of the season.
+      Stats common to skaters and goalies, per game: one row per game, player and stat (long format).
+      `toi_seconds` (time on ice, from the shifts: a row means a game played), `goals` and `assists`
+      (shootout goals excluded). A player with no row for a stat had none of it.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
-            combination_of_columns: ['season', 'ranking_date', 'player_id']
+            combination_of_columns: ['game_id', 'player_id', 'stat_name']
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "stat_value >= 0"
+      # A player plays at most a full game: 60 minutes plus 5 minutes of overtime
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "stat_value <= 3900"
+          config:
+            where: "stat_name = 'toi_seconds'"
     columns:
-      - name: number_of_points
+      - name: game_id
+        description: "{{ doc('game_id') }}"
         data_tests:
-          - dbt_utils.accepted_range:
+          - not_null
+      - name: player_id
+        description: "{{ doc('player_id') }}"
+        data_tests:
+          - not_null
+          - relationships:
               arguments:
-                min_value: 1
+                to: ref('dim_players')
+                field: player_id
+      - name: stat_name
+        description: >
+          `toi_seconds`: seconds on the ice, the sum of the player's shifts. `goals`, `assists`: goals
+          and assists (first and second) in the game, shootout excluded.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['toi_seconds', 'goals', 'assists']
+      - name: stat_value
+        description: Value of the stat, a count (seconds for `toi_seconds`).
+      - name: fetched_at
+        description: >
+          Latest load of the game among its game row, its play-by-play and its shifts: a reload of any
+          of the three recomputes the game downstream.
+        data_tests:
+          - not_null
+
+  - name: int_goalie_game_stats
+    description: >
+      Goalie-only stats, per game: one row per game, goalie and stat (long format): `saves`,
+      `goals_against` and `shutout`. Shootouts are left out, and empty net goals are charged to no
+      goalie. A goalie with no row for a stat had none of it (`shutout` only has a row, worth 1, when
+      the goalie got one). Time on ice and games played are in int_player_game_stats.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['game_id', 'player_id', 'stat_name']
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "stat_value >= 0"
+    columns:
+      - name: game_id
+        description: "{{ doc('game_id') }}"
+        data_tests:
+          - not_null
+      - name: player_id
+        description: "{{ doc('player_id') }}"
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_players')
+                field: player_id
+      - name: stat_name
+        description: >
+          `saves`: shots on goal stopped. `goals_against`: goals allowed with the goalie in net.
+          `shutout`: 1 when the goalie was the only one used by their team and the team allowed no
+          goal, shootout excluded (so the loser of a game that is 0-0 until the shootout gets one too).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['saves', 'goals_against', 'shutout']
+      - name: stat_value
+        description: Value of the stat, a count.
+      - name: fetched_at
+        description: >
+          Latest load of the game among its game row, its play-by-play and its shifts: a reload of any
+          of the three recomputes the game downstream.
+        data_tests:
+          - not_null
