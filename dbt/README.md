@@ -3,9 +3,9 @@
 This is the transformation part of the project. It takes the raw NHL API data loaded in Snowflake and builds:
 
 * the league standings for every day of the season, with all the NHL tie breakers,
-* the player rankings (goals, assists, points) for every day,
+* the season to date stats of every skater (games played, time on ice, goals, assists, points, penalty minutes, shots, even strength / power play / short handed splits, +/-) and every goalie (games played and started, time on ice, goals against, saves, shutouts, wins, losses, OT losses, goals against average, save percentage) for every day,
 * the games and goals, with the situation of each goal (power play, short handed, empty net, penalty shot),
-* every play of every game, and the rosters,
+* every play of every game, the rosters, and every shift of every player,
 * each team's stats for each game, including the power play opportunities, worked out by replaying the penalties of the game,
 * each team's travel from arena to arena during the season.
 
@@ -44,11 +44,11 @@ NHL_RAW.RAW (append only, every load is kept)
 │                                               │           └──────────────► fct_league_rankings ◄───────────────────┘
 │                                               └──► fct_games ──► fct_team_travel ◄── dim_teams
 │
+├── GAMES_SHIFTS_RAW ───► stg_nhl_api__games_shifts ──► fct_games_shifts
+│
 └── GAMES_PBP_RAW ──────► stg_nhl_api__pbp ─────┬──► fct_games_events (also uses stg_nhl_api__games)
-                                                ├──► stg_nhl_api__goals ──┬──► int_player_scoring_cumulative ──► fct_player_goals_rankings
-                                                │                         │     (cumulative, incremental)         fct_player_assists_rankings
-                                                │                         │                                       fct_player_points_rankings
-                                                │                         └──► fct_goals (also uses stg_nhl_api__games)
+                                                ├──► stg_nhl_api__goals ──► int_goals_situations ──► fct_goals
+                                                │                           (also uses stg_nhl_api__games)
                                                 └──► stg_nhl_api__game_rosters ──┬──► fct_game_rosters ──► snapshot nhl_players_team_snapshot (also uses fct_games)
                                                                                  └──► dim_players (also uses stg_nhl_api__games)
 
@@ -60,6 +60,16 @@ fct_games_events ──┬──► fct_games_pp_segments (Python, also uses fct
 fct_game_rosters ─────────────────────────────────────────────────────────────┼──► fct_games_stats
 fct_goals ─────────┬──► fct_games_leading_segments (also uses fct_games) ─────┤
                    └──────────────────────────────────────────────────────────┘
+
+Player stats: per game in intermediate, season to date in the marts
+(the per-game models read stg_nhl_api__games_shifts, stg_nhl_api__goals, stg_nhl_api__pbp,
+stg_nhl_api__games, dim_players, and int_goals_situations and int_team_game_results for the
+situations, +/- and goalie decisions)
+
+int_player_game_stats ─┬──────────────────────────► fct_skater_stats  (cumulative, incremental)
+(every player)         │   int_skater_game_stats ──┘
+                       └──────────────────────────► fct_goalie_stats  (cumulative, incremental)
+                           int_goalie_game_stats ──┘
 ```
 
 ## Models
@@ -74,6 +84,7 @@ The models reading a raw table parse the JSON and keep only the latest load of e
 | `stg_nhl_api__pbp` | play (event) | The latest play by play of each game is picked before flattening, so no play is lost. `player_1_id` to `player_3_id` hold the players involved, and `player_*_desc` says what each one did |
 | `stg_nhl_api__goals` | goal, shootouts excluded | Built from `stg_nhl_api__pbp`: scorer and assists are `player_1_id` to `player_3_id` |
 | `stg_nhl_api__game_rosters` | player and game | Every player who dressed, from the `rosterSpots` of the latest play by play: name, team, position, sweater number, headshot |
+| `stg_nhl_api__games_shifts` | shift of a player | Only the real shifts (`typeCode = 517`). The shift chart also has one row per goal (`typeCode = 505`), which is left out |
 
 ### Intermediate (`models/intermediate/`, schema `INTERMEDIATE`)
 
@@ -82,16 +93,19 @@ The models reading a raw table parse the JSON and keep only the latest load of e
 | `int_team_game_results` | view | One row per team per game, with `win`, `regulation_win`, `regulation_ot_win` and `points` |
 | `int_league_ranking_pre_tie_breaker` | incremental (delete+insert on `season, ranking_date`) | Season to date totals per team and per day, plus day 0. This is where the running totals are stored |
 | `int_tied_teams_rate` | view | Head to head points % between teams that are tied, per day |
-| `int_player_scoring_cumulative` | incremental (delete+insert on `season, ranking_date`) | Season to date goals and assists per player and per day |
+| `int_goals_situations` | view | One row per goal, shootout excluded, with its situation from the scoring team's side (see [Goal situations](#goal-situations-int_goals_situations-fct_goals)) |
+| `int_player_game_stats` | view | One row per player, game and stat, for the stats common to skaters and goalies: time on ice, goals, assists, penalty minutes |
+| `int_skater_game_stats` | view | One row per skater, game and stat, for the skater-only stats: shots, even strength / power play / short handed goals and assists, penalty shot goals, +/- |
+| `int_goalie_game_stats` | view | One row per goalie, game and stat, for the goalie-only stats: saves, goals against, shutout, game started, decision |
 
 ### Marts (`models/marts/`, schema `MARTS`)
 
 | Model | One row per | Materialization |
 |---|---|---|
 | `fct_league_rankings` | team and day | incremental (delete+insert on `season, ranking_date`) |
-| `fct_player_goals_rankings` | player and day (players with at least one goal) | incremental (delete+insert on `season, ranking_date`) |
-| `fct_player_assists_rankings` | player and day (players with at least one assist) | incremental (delete+insert on `season, ranking_date`) |
-| `fct_player_points_rankings` | player and day | incremental (delete+insert on `season, ranking_date`) |
+| `fct_skater_stats` | skater and day, from their first game | incremental (delete+insert on `season, ranking_date`), cumulative |
+| `fct_goalie_stats` | goalie and day, from their first game | incremental (delete+insert on `season, ranking_date`), cumulative |
+| `fct_games_shifts` | shift of a player | incremental (delete+insert on `game_id`) |
 | `fct_games` | game | incremental (merge on `game_id`) |
 | `fct_goals` | goal | incremental (delete+insert on `game_id`) |
 | `fct_games_events` | play | incremental (delete+insert on `game_id`) |
@@ -114,11 +128,11 @@ The snapshot is built from `fct_game_rosters` and `fct_games`. For each player i
 
 The snapshot only looks at games up to its `as_of` var (today by default). That is how its history was rebuilt: [`scripts/replay_player_team_snapshot.py`](../scripts/replay_player_team_snapshot.py) runs `dbt snapshot --vars '{as_of: ...}'` once per game date, oldest first, in a one-off dbt Cloud production job.
 
-### Goal situations (`fct_goals`)
+### Goal situations (`int_goals_situations`, `fct_goals`)
 
 The play by play gives a 4 digit `situation_code` for every goal: away goalie in net (1 or 0), away skaters, home skaters, home goalie in net. `1541` means the away team had 5 skaters and the home team 4.
 
-`fct_goals` reads that code from the scoring team's side and adds three columns:
+`int_goals_situations` reads that code from the scoring team's side and adds three columns. `fct_goals` is a table copy of it for the app, and the player stats read it for the even strength / power play / short handed splits, +/- and the goalie decisions:
 
 * `strength`: skaters on each side, scoring team first, like `5 on 4`, or `Penalty shot`.
 * `strength_situation`, who had more skaters:
@@ -203,6 +217,51 @@ Cuts each game by the score, from `fct_goals`: one row per stretch with the same
 
 For every game of a team, this model gives the arena it played in and the arena of its previous game, with the distance between the two. The arena names and coordinates come from the `nhl_teams` seed, and the distance is computed with Snowflake's `haversine`. That is a straight line distance, not the real route. It is 0 when the team stays in the same arena, for example during a home stand, and null for the first game of the season. It isn't used by the app yet: a travel page is the next thing I want to build.
 
+### Skater and goalie stats (`fct_skater_stats`, `fct_goalie_stats`)
+
+Two tables of season to date stats, one row per player and per day, with no ranking. The standings need dbt to rank the teams, because of the tie breakers, but sorting players by a stat is only a sort, so the app does it on whichever stat it shows.
+
+The stats are split in three families, each with its own per-game model in intermediate:
+
+| Family | Per-game model | Stats |
+|---|---|---|
+| Common to every player | `int_player_game_stats` | games played, time on ice, goals, assists, penalty minutes |
+| Skater only | `int_skater_game_stats` | shots, even strength / power play / short handed goals and assists, penalty shot goals, +/- |
+| Goalie only | `int_goalie_game_stats` | saves, goals against, shutouts, games started, wins, losses, OT losses |
+
+The per-game models are in long format, one row per player, game and stat, like `fct_games_stats`, so a new stat is one more block in a `union all`. The season to date totals are kept in the two marts, `fct_skater_stats` (common + skater stats of every player but the goalies) and `fct_goalie_stats` (common + goalie stats), which pivot the per-game rows and keep the running totals (see [How the cumulative models work](#how-the-cumulative-models-work)). There is no intermediate cumulative table: the mart is the cumulative table. Computed stats, like points, the goals against average or the save percentage, are only computed there, from the totals. A game is recomputed when its game row, its play by play or its shifts have a newer load.
+
+* **Games played and time on ice** come from the shifts, for skaters and goalies alike: a player has played a game when they had at least one shift. A backup goalie who stayed on the bench doesn't count as a game played.
+* **Goals and assists** come from `stg_nhl_api__goals`, shootout goals excluded.
+* **Saves and goals against** come from the play by play: the `shot-on-goal` and `goal` events with that goalie in net (`goalie_in_net_id`).
+* **Penalty minutes** are the `duration` of the penalties a player committed. Bench minors, served by a player but charged to no one, and penalty shots (0 minutes) add nothing.
+* **Shots** are the player's `shot-on-goal` and `goal` events, shootout excluded.
+
+Skater rules:
+
+* The goals and assists are split by the `strength_situation` of the goal (`EV`, `PP`, `SH`). Penalty shot goals get their own stat, `ps_goals`, and are never assisted, so the splits add up to the goals and the assists.
+* **+/-**: each skater on the ice for an even strength or short handed goal of their team gets +1, each skater of the other team on the ice gets -1. Power play goals and penalty shots don't count. A skater was on the ice when one of their shifts in that period covers the time of the goal: it started before the goal and ended at it or after (play stops on a goal, so the shifts on the ice end exactly at that time, and the players coming on for the faceoff start at it).
+
+Goalie rules:
+
+* Shootouts don't count: their goals and saves are left out, and they have no shifts.
+* An empty net goal isn't charged to any goalie.
+* A shutout goes to a goalie who was the only one their team used, when the team allowed no goal outside the shootout. In a game that is 0-0 until the shootout, both goalies get one. Since the final score gives the shootout winner one goal, the loser of such a game shows 1 goal against in `int_team_game_results`, and the model looks for that case.
+* The goals against average (`goals_against` x 3600 / `toi_seconds`) and the save percentage (`saves` / `shots_against`) are computed on each row from the season totals. Only the counts are accumulated, because a ratio can't be added up from one game to the next.
+* A game started goes to the goalie in net at the opening faceoff, the one whose shift starts at 00:00 of period 1.
+* **Decisions** (wins, losses, OT losses): each team's goalie of record gets its team's result from `int_team_game_results`. The goalie of record is the one in net at the game-winning goal, the goal that put the winning team ahead for good (the winner's goal that makes its score the loser's final score + 1). If the net was empty at that moment, it's the goalie who had been pulled. In practice, it's the team's goalie whose latest shift started before the goal. A game decided in a shootout has no game-winning goal outside the shootout: the decisions go to the goalies in net at the end of overtime. A loss in overtime or in a shootout is an OT loss.
+* Every goalie is kept, as in the full stats table on nhl.com, so a goalie with one game can lead the goals against average. The app is where a minimum number of games belongs.
+
+**Adding a stat** takes four steps: a block in the `union all` of its per-game model, a line in the pivot of the mart (`sum(iff(stat_name = '...', stat_value, 0))`), its running total and `prior_` column in the mart's cumulative CTEs, then a `--full-refresh` of the mart, whose `on_schema_change='fail'` refuses a new column otherwise. Then add the stat to the `accepted_values` of `stat_name` in the yml, and to the list of stats of the recomputation test of its mart (`assert_skater_totals_match_recomputation` or `assert_goalie_totals_match_recomputation`), which catches a stat forgotten in `prior_rows` or `prior_state`.
+
+### Shifts (`fct_games_shifts`)
+
+Every shift of every player, from the NHL shift API: period, start, end and duration, as `MM:SS`. The goalie stats only use the goalies' shifts so far.
+
+The shift API turned out to be unreliable on past games. It never got the shifts of 50 games in a row (`2026020154` to `2026020203`, from 22 October 2026), recorded the same minutes twice for some players (game `2025020512`: both goalies 12 to 14 minutes too high once summed) and put the shifts of two teams that didn't play into a game (game `2025020565`). The NHL also publishes every game's shifts in its HTML time on ice reports, one per team, and those were clean on every game checked: each player's total equals the official time on ice of the boxscore. So the one-off DAG `backfill_shifts_from_html` reloaded every game of the 2025-2026 season and of 2026-2027 so far from those reports, in the same format as the API. Only the API's internal ids are missing (`shift_id` is null for those games).
+
+The daily DAG still loads the shifts from the API. Three singular tests watch for the problems seen in the past: `assert_overlapping_shifts` (a player on the ice twice at the same time), `assert_shift_teams_are_correct` (a team that didn't play the game) and `assert_every_game_has_shifts` (a game without shifts, a warning only). When one of them catches a game, deleting that game's payloads from `GAMES_SHIFTS_RAW` and triggering `backfill_shifts_from_html` reloads it from the HTML, since that DAG only loads the games missing from the table.
+
 ### Macros
 
 | Macro | What it does | Where it's used |
@@ -213,10 +272,10 @@ For every game of a team, this model gives the arena it played in and the arena 
 
 ## How the cumulative models work
 
-`int_league_ranking_pre_tie_breaker` and `int_player_scoring_cumulative` store a running total per day, so a run doesn't have to recompute the whole season. On each run:
+`int_league_ranking_pre_tie_breaker`, `fct_skater_stats` and `fct_goalie_stats` store a running total per day, so a run doesn't have to recompute the whole season. On each run:
 
 1. The model looks for rows loaded since its last run (`fetched_at` later than the highest `_source_fetched_at` already in the table) and takes the earliest game date among them. That is where the batch starts.
-2. It reads each team's (or player's) last row before that date. That is the state to start from.
+2. It reads each team's (or player's, or goalie's) last row before that date. That is the state to start from.
 3. It recomputes every day from the batch start onwards, by adding the daily results to that state.
 4. It replaces those days in the table (`delete+insert` on `season, ranking_date`).
 
@@ -232,7 +291,7 @@ So in practice:
 | New season | Starts from 0 on its own, since the state is looked up per season |
 | `--full-refresh` or an empty schema | Everything is rebuilt from raw with the same code |
 
-The marts downstream only pick up the days that were recomputed, using `_batch_loaded_at`.
+`fct_league_rankings`, downstream of `int_league_ranking_pre_tie_breaker`, only picks up the days that were recomputed, using `_batch_loaded_at`.
 
 ## Environments
 
@@ -261,6 +320,8 @@ They are declared in the `_*__models.yml` files, next to the descriptions.
 | | `game_id`, `event_id`, `scoring_player_id` | not null |
 | `stg_nhl_api__game_rosters` | `game_id` + `player_id` | unique together |
 | | `game_id`, `player_id`, `team_id` | not null |
+| `stg_nhl_api__games_shifts` | `game_id`, `team_id`, `player_id` | not null |
+| | `period` | not null, one of 1, 2, 3, 4 |
 | `int_team_game_results` | `game_id` + `team_id` | unique together |
 | | `points` | one of 0, 1, 2 |
 | | `result` | not null, one of `W`, `L`, `OT` |
@@ -270,16 +331,42 @@ They are declared in the `_*__models.yml` files, next to the descriptions.
 | | `streak_result` | one of `W`, `L`, `OT` |
 | `int_tied_teams_rate` | `season` + `ranking_date` + `tie_group_id` + `team_id` | unique together |
 | | `tie_rate` | not null, between 0 and 1 |
-| `int_player_scoring_cumulative` | `season` + `ranking_date` + `player_id` | unique together |
-| | `number_of_points` | at least 1 |
+| `int_goals_situations` | `game_id` + `event_id` | unique together |
+| | `game_id`, `event_id` | not null |
+| | `strength_situation` | not null, one of `PS`, `PP`, `SH`, `EV` |
+| | `net_situation` | not null, one of `EN`, `EA`, `NORMAL` |
+| `int_player_game_stats` | `game_id` + `player_id` + `stat_name` | unique together |
+| | `game_id`, `stat_name`, `fetched_at` | not null |
+| | `player_id` | not null, exists in `dim_players` |
+| | `stat_name` | one of `toi_seconds`, `goals`, `assists`, `penalty_minutes` |
+| | whole row | `stat_value` is 0 or more, and `toi_seconds` is at most 3,900 (60 minutes plus 5 of overtime). Catches a game whose shifts are counted twice |
+| `int_skater_game_stats` | `game_id` + `player_id` + `stat_name` | unique together |
+| | `game_id`, `stat_name`, `fetched_at` | not null |
+| | `player_id` | not null, exists in `dim_players` |
+| | `stat_name` | one of `shots`, `ev_goals`, `ev_assists`, `pp_goals`, `pp_assists`, `sh_goals`, `sh_assists`, `ps_goals`, `plus_minus` |
+| | whole row | `stat_value` is 0 or more, except `plus_minus` |
+| `int_goalie_game_stats` | `game_id` + `player_id` + `stat_name` | unique together |
+| | `game_id`, `stat_name`, `fetched_at` | not null |
+| | `player_id` | not null, exists in `dim_players` |
+| | `stat_name` | one of `saves`, `goals_against`, `shutout`, `games_started`, `awarded_wins`, `awarded_losses`, `awarded_ot_losses` |
+| | whole row | `stat_value` is 0 or more |
 | `fct_league_rankings` | `season` + `ranking_date` + `team_id` | unique together |
 | | `ranking` | not null, between 1 and 32 |
 | | `team_id` | not null, exists in `dim_teams` |
 | | `losses`, `ot_losses`, `home_record`, `away_record`, `shootout_record`, `last_10_record` | not null |
 | | `points_pct` | between 0 and 1 |
 | | `streak` | a result and a number of games, like `W2`, `L1` or `OT1` (when not null) |
-| `fct_player_goals_rankings`, `fct_player_assists_rankings`, `fct_player_points_rankings` | `season` + `ranking_date` + `player_id` | unique together |
-| | `ranking` | not null |
+| `fct_skater_stats` | `season` + `ranking_date` + `player_id` | unique together |
+| | whole row | `points` = `goals` + `assists`, and `toi_seconds` ≤ 3,900 × `games_played` |
+| | whole row | the even strength, power play, short handed and penalty shot goals add up to `goals`, the assist splits to `assists`, and `shots` ≥ `goals` |
+| | `player_id` | not null, exists in `dim_players` |
+| | `games_played` | at least 1 |
+| `fct_goalie_stats` | `season` + `ranking_date` + `player_id` | unique together |
+| | whole row | `shots_against` = `goals_against` + `saves`, `shutouts` ≤ `games_played`, `toi_seconds` ≤ 3,900 × `games_played`, `games_started` ≤ `games_played`, and the decisions add up to at most `games_played` |
+| | `player_id` | not null, exists in `dim_players` |
+| | `games_played` | at least 1 |
+| | `gaa` | 0 or more |
+| | `save_pct` | between 0 and 1 |
 | `fct_games` | `game_id` | unique, not null |
 | `fct_goals` | `game_id` + `event_id` | unique together |
 | | `strength_situation` | not null, one of `PS`, `PP`, `SH`, `EV` |
@@ -309,9 +396,17 @@ They are in `tests/`. Each one returns the rows that break its rule, so a passin
 | Test | Model checked | Rule |
 |---|---|---|
 | `assert_standings_match_recomputation` | `fct_league_rankings` | On the latest day of each season, every team's `games_played`, `points`, `total_wins`, `regulation_wins`, `regulation_ot_wins`, `goals_for`, `goals_against`, `losses` and `ot_losses` equal the same totals recomputed from scratch from `int_team_game_results`. Catches a day counted twice or skipped by the incremental runs |
-| `assert_player_totals_match_recomputation` | `int_player_scoring_cumulative` | On the latest day of each season, every player's `number_of_goals` and `number_of_assists` equal a count from scratch over `stg_nhl_api__goals` (scorer, first assist, second assist) |
+| `assert_skater_totals_match_recomputation` | `fct_skater_stats` | On the latest day of each season, every skater total of the mart equals a sum from scratch over `int_player_game_stats` and `int_skater_game_stats`. Catches drift from the incremental runs, and a stat forgotten in `prior_rows` / `prior_state`, which a full refresh doesn't show. The stats checked are a Jinja list at the top of the test |
 | `assert_team_totals_never_decrease` | `fct_league_rankings` | Within a season, none of `games_played`, `points`, `total_wins`, `regulation_wins`, `regulation_ot_wins`, `goals_for`, `goals_against` is lower than on the team's previous day. Catches a day replaced with older data |
-| `assert_player_totals_never_decrease` | `int_player_scoring_cumulative` | Within a season, `number_of_goals` and `number_of_assists` are never lower than on the player's previous day |
+| `assert_skater_totals_never_decrease` | `fct_skater_stats` | Within a season, no skater total is lower than on the skater's previous day, except `plus_minus`, which goes down on every goal against |
+| `assert_goalie_totals_match_recomputation` | `fct_goalie_stats` | Same as for the skaters, over `int_player_game_stats` and `int_goalie_game_stats` |
+| `assert_goalie_totals_never_decrease` | `fct_goalie_stats` | Within a season, no goalie total is lower than on the goalie's previous day |
+| `assert_two_starters_per_game` | `int_goalie_game_stats` | Every finished game has exactly two starting goalies. Catches a game with missing or duplicated goalie shifts |
+| `assert_two_decisions_per_game` | `int_goalie_game_stats` | Every finished game gives exactly one win, and one loss or OT loss. Catches a game where no goalie of record was found, or two goalies of the same team got the decision |
+| `assert_player_shots_match_team_shots` | `int_skater_game_stats`, `fct_games_stats` | A team's `Shots On Goal` in a game equal the sum of its players' shots. A warning: `fct_games_stats` still counts the shootout attempts, so the games decided in a shootout are returned until that is fixed |
+| `assert_every_game_has_shifts` | `stg_nhl_api__games_shifts` | Every finished game has shifts. A warning, not an error: the NHL sometimes publishes a shift chart after the game, and the next daily run picks it up. A game that stays in the list for days was never published by the shift API |
+| `assert_overlapping_shifts` | `stg_nhl_api__games_shifts` | No two shifts of the same player overlap in a period, and no shift is there twice. Catches a game whose shifts the API recorded twice, which would count that time twice |
+| `assert_shift_teams_are_correct` | `stg_nhl_api__games_shifts` | Every shift belongs to one of the two teams of its game. Catches a shift chart holding the shifts of another game |
 | `assert_every_game_date_has_standings` | `fct_league_rankings` | Every `game_date` of `stg_nhl_api__games` has standings for that season and date. Catches a day loaded into raw but never processed |
 | `assert_every_ranking_date_is_complete` | `fct_league_rankings` | Every day has as many teams as the `nhl_teams` seed (32), and the best `ranking` is 1 once at least one game has been played (on day 0 every team is ranked last) |
 | `assert_team_record_is_consistent` | `fct_league_rankings` | For every team and day: `total_wins` ≤ `games_played`, `regulation_wins` ≤ `regulation_ot_wins` ≤ `total_wins`, `points` ≥ 2 × `total_wins`, `points` − 2 × `total_wins` ≤ losses (each loss is worth at most 1 point), `total_wins` + `losses` + `ot_losses` = `games_played` (every game is a win, a regulation loss or an OT/SO loss), and `goal_diff` = `goals_for` − `goals_against` |

@@ -119,17 +119,221 @@ models:
                 min_value: 0
                 max_value: 1
 
-  - name: int_player_scoring_cumulative
+  - name: int_goals_situations
     description: >
-      Cumulative state table (incremental): season-to-date goals and assists per player for every
-      game date, from the player's first point of the season.
+      One row per goal of a finished game, shootout goals excluded, with its situation from the scoring
+      team's point of view: who had more skaters (strength_situation), which net was empty
+      (net_situation) and the skaters on each side (strength), all worked out from situation_code.
+      Read by fct_goals and by the player stats (EV / PP / SH splits, +/-, goalie decisions).
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
-            combination_of_columns: ['season', 'ranking_date', 'player_id']
+            combination_of_columns: ['game_id', 'event_id']
     columns:
-      - name: number_of_points
+      - name: game_id
+        description: "{{ doc('game_id') }}"
         data_tests:
-          - dbt_utils.accepted_range:
+          - not_null
+      - name: event_id
+        description: Id of the goal event within the game's play-by-play.
+        data_tests:
+          - not_null
+      - name: team_id
+        description: Team that scored the goal. Joins to `dim_teams.team_id`.
+      - name: situation_code
+        description: "{{ doc('situation_code') }}"
+      - name: home_score
+        description: Home team score right after this goal.
+      - name: away_score
+        description: Away team score right after this goal.
+      - name: scoring_player_id
+        description: Player who scored. Joins to `dim_players.player_id`.
+      - name: assist1_player_id
+        description: Player credited with the first assist. Null for an unassisted goal.
+      - name: assist2_player_id
+        description: Player credited with the second assist. Null when there is at most one assist.
+      - name: period_number
+        description: Period of the goal (1-3 = regulation, 4 = overtime).
+      - name: time_in_period
+        description: Time elapsed in the period when the goal was scored, as `MM:SS`.
+      - name: time_remaining_in_period
+        description: Time left in the period when the goal was scored, as `MM:SS`.
+      - name: fetched_at
+        description: "{{ doc('fetched_at') }}"
+      - name: strength_situation
+        description: >
+          Who had more skaters, from the scoring team's point of view. PS = penalty shot, PP = power
+          play, SH = short handed, EV = even strength. The extra skater of a pulled goalie is taken off
+          both sides first, so a goal into the empty net of a penalised team is PP.
+        data_tests:
+          - not_null
+          - accepted_values:
               arguments:
-                min_value: 1
+                values: ['PS', 'PP', 'SH', 'EV']
+      - name: net_situation
+        description: >
+          Which net was empty, from the scoring team's point of view. EN = empty net (the other team had
+          pulled its goalie), EA = extra attacker (the scoring team had pulled its goalie), NORMAL = both
+          goalies in. Independent of strength_situation.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['EN', 'EA', 'NORMAL']
+      - name: strength
+        description: >
+          Skaters on the ice when the goal was scored, scoring team first, e.g. `5 on 4`. Goalies are not
+          counted, so a team with its goalie pulled shows 6 skaters. `Penalty shot` for a penalty shot goal.
+
+  # Per-game player stats, long format: one row per game, player and stat, in three families (common
+  # to every player, skater only, goalie only). Season-to-date totals are in the marts
+  # fct_skater_stats and fct_goalie_stats.
+
+  - name: int_player_game_stats
+    description: >
+      Stats common to skaters and goalies, per game: one row per game, player and stat (long format).
+      A player with no row for a stat had none of it.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['game_id', 'player_id', 'stat_name']
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "stat_value >= 0"
+      # A player plays at most a full game: 60 minutes plus 5 minutes of overtime
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "stat_value <= 3900"
+          config:
+            where: "stat_name = 'toi_seconds'"
+    columns:
+      - name: game_id
+        description: "{{ doc('game_id') }}"
+        data_tests:
+          - not_null
+      - name: player_id
+        description: "{{ doc('player_id') }}"
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_players')
+                field: player_id
+      - name: stat_name
+        description: >
+          `toi_seconds`: seconds on the ice, the sum of the player's shifts (a row means a game played).
+          `goals`, `assists`: goals and assists (first and second), shootout excluded.
+          `penalty_minutes`: the duration of the penalties the player committed; bench minors, charged to
+          no player, and penalty shots (0 minutes) add nothing.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['toi_seconds', 'goals', 'assists', 'penalty_minutes']
+      - name: stat_value
+        description: Value of the stat, a count (seconds for `toi_seconds`, minutes for `penalty_minutes`).
+      - name: fetched_at
+        description: >
+          Latest load of the game among its game row, its play-by-play and its shifts: a reload of any
+          of the three recomputes the game downstream.
+        data_tests:
+          - not_null
+
+  - name: int_skater_game_stats
+    description: >
+      Skater-only stats, per game: one row per game, skater and stat (long format). A skater with no row
+      for a stat had none of it. The goal splits and +/- come from int_goals_situations.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['game_id', 'player_id', 'stat_name']
+      # Every stat is a count, except +/- which can be negative
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "stat_value >= 0"
+          config:
+            where: "stat_name <> 'plus_minus'"
+    columns:
+      - name: game_id
+        description: "{{ doc('game_id') }}"
+        data_tests:
+          - not_null
+      - name: player_id
+        description: "{{ doc('player_id') }}"
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_players')
+                field: player_id
+      - name: stat_name
+        description: >
+          `shots`: shots on goal (the `shot-on-goal` and `goal` events of the player), shootout excluded.
+          `ev_goals`, `ev_assists`, `pp_goals`, `pp_assists`, `sh_goals`, `sh_assists`: goals and assists
+          split by the strength_situation of the goal (even strength, power play, short handed).
+          `ps_goals`: penalty shot goals (never assisted). `plus_minus`: +1 for each even strength or short
+          handed goal of the skater's team while they were on the ice (a shift covering the time of the
+          goal), -1 for each one of the other team; power play goals and penalty shots don't count.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['shots', 'ev_goals', 'ev_assists', 'pp_goals', 'pp_assists', 'sh_goals', 'sh_assists', 'ps_goals', 'plus_minus']
+      - name: stat_value
+        description: Value of the stat, a count, except `plus_minus` which can be negative.
+      - name: fetched_at
+        description: >
+          Latest load of the game among its game row, its play-by-play and its shifts: a reload of any
+          of the three recomputes the game downstream.
+        data_tests:
+          - not_null
+
+  - name: int_goalie_game_stats
+    description: >
+      Goalie-only stats, per game: one row per game, goalie and stat (long format). Shootouts are left
+      out, and empty net goals are charged to no goalie. A goalie with no row for a stat had none of it
+      (`shutout`, `games_started` and the decisions only have a row, worth 1, when the goalie got one).
+      Time on ice and games played are in int_player_game_stats.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['game_id', 'player_id', 'stat_name']
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "stat_value >= 0"
+    columns:
+      - name: game_id
+        description: "{{ doc('game_id') }}"
+        data_tests:
+          - not_null
+      - name: player_id
+        description: "{{ doc('player_id') }}"
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_players')
+                field: player_id
+      - name: stat_name
+        description: >
+          `saves`: shots on goal stopped. `goals_against`: goals allowed with the goalie in net.
+          `shutout`: 1 when the goalie was the only one used by their team and the team allowed no goal,
+          shootout excluded (so the loser of a game that is 0-0 until the shootout gets one too).
+          `games_started`: 1 for the goalie in net at the opening faceoff (shift starting at 00:00 of
+          period 1). `awarded_wins`, `awarded_losses`, `awarded_ot_losses`: the decision, 1 for the
+          goalie of record of each team (the goalie whose latest shift started before the game-winning
+          goal, or before the end of overtime for a shootout), from the team's result in
+          int_team_game_results (W, L, OT).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['saves', 'goals_against', 'shutout', 'games_started', 'awarded_wins', 'awarded_losses', 'awarded_ot_losses']
+      - name: stat_value
+        description: Value of the stat, a count.
+      - name: fetched_at
+        description: >
+          Latest load of the game among its game row, its play-by-play and its shifts: a reload of any
+          of the three recomputes the game downstream.
+        data_tests:
+          - not_null

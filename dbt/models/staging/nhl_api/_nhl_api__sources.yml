@@ -11,4 +11,8 @@ sources:
       - name: GAMES_PBP_RAW
         description: One play-by-play payload (one game) per load.
       - name: GAMES_SHIFTS_RAW
-        description: One game shift payload (one game) per load
+        description: >
+          One shift chart payload (one game) per load. Daily loads come from the NHL shift API. Every
+          earlier game (2025-2026, and 2026-2027 up to mid-November) was loaded from the NHL's HTML
+          time-on-ice reports by the one-off DAG backfill_shifts_from_html, in the same format, since
+          the API had missing, duplicated and misplaced shifts.

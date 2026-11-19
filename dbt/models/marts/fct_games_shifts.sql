@@ -1,6 +1,7 @@
-{{ config(materialized='incremental', unique_key='game_id') }}
+{{ config(materialized='incremental', incremental_strategy='delete+insert', unique_key='game_id') }}
 
--- One row per finished game. New or reloaded games are merged on game_id.
+-- One row per shift of a finished game. A reloaded game replaces all its shifts (delete+insert on
+-- game_id): a merge would fail, since a game has many rows.
 
 select
     game_id,
@@ -8,7 +9,6 @@ select
     player_id,
     shift_number,
     period,
-    shift_id,
     start_time,
     end_time,
     duration,

@@ -1,11 +1,19 @@
-"""Standings page: the standings table on a chosen date, for the league, a conference or a division."""
+"""Standings page: the standings table on a chosen date, for the league, a conference or a division.
+Clicking a column header sorts the table by that column and highlights it (see sortable_table); the
+Official NHL Rank, with every tie breaker, stays as it is."""
 
 import base64
 
 import streamlit as st
+from st_aggrid import JsCode
 
 from common import date_picker, group_picker, load_rankings, season_picker, view_picker
+from sortable_table import NUMBER_COLUMN, TEXT_COLUMN, UNSORTABLE, image_column, sortable_table
 
+
+ROW_HEIGHT = 35  # pixels, st.dataframe's default
+IMAGE_HEIGHT = 29  # pixels, as st.dataframe draws an image in a 35px row
+ICONS_HEIGHT = 27  # pixels, the last 10 icons, a little smaller so the table fits on a laptop
 
 # Last 10 icons. Always 10 slots wide, so the icons line up from one team to the next even before
 # the 10th game
@@ -13,37 +21,59 @@ WIN_COLOR = "#2E9E5B"
 OT_COLOR = "#9E9E9E"
 LOSS_COLOR = "#D64545"
 ICON_STEP = 18  # pixels between the left of two icons, at the SVG's own size
-# The table scales every image to the row's height (29 px inside a 35 px row). The SVG is made taller
-# than the 16 px icons, with empty space above and below, so that once scaled the 10 icons fit in
-# LAST_10_WIDTH: 10 x 18 x 29 / 32 = 163 px, for 174 px inside the cell's padding
+# The image is drawn ICONS_HEIGHT tall. The SVG is made taller than the 16 px icons, with empty space
+# above and below, so that once scaled the 10 icons fit in LAST_10_WIDTH: 10 x 18 x 27 / 32 = 152 px
 ICON_SVG_HEIGHT = 32
-LAST_10_WIDTH = 190  # pixels, of the L10 column
+LAST_10_WIDTH = 175  # pixels, of the Last 10 column
 
-COLUMNS = {
-    "RANK": st.column_config.NumberColumn("Rank", width="small"),
-    "LOGO_URL": st.column_config.ImageColumn("", width="small"),
-    "TEAM": st.column_config.TextColumn("Team"),
-    "GAMES_PLAYED": st.column_config.NumberColumn("GP", help="Games played"),
-    "TOTAL_WINS": st.column_config.NumberColumn("W", help="Wins, including shootout wins"),
-    "LOSSES": st.column_config.NumberColumn("L", help="Losses in regulation"),
-    "OT_LOSSES": st.column_config.NumberColumn("OT", help="Losses in overtime or in a shootout"),
-    "POINTS": st.column_config.NumberColumn("PTS", help="Points: win = 2, OT/shootout loss = 1"),
-    "POINTS_PCT": st.column_config.NumberColumn("P%", help="Points % = points / (2 x games played)"),
-    "REGULATION_WINS": st.column_config.NumberColumn("RW", help="Regulation wins"),
-    "REGULATION_OT_WINS": st.column_config.NumberColumn("ROW", help="Regulation + overtime wins"),
-    "GOALS_FOR": st.column_config.NumberColumn("GF", help="Goals for"),
-    "GOALS_AGAINST": st.column_config.NumberColumn("GA", help="Goals against"),
-    "GOAL_DIFF": st.column_config.NumberColumn("DIFF", help="Goal differential"),
-    "HOME_RECORD": st.column_config.TextColumn("Home", help="Record at home: W-L-OT"),
-    "AWAY_RECORD": st.column_config.TextColumn("Away", help="Record away: W-L-OT"),
-    "SHOOTOUT_RECORD": st.column_config.TextColumn("S/O", help="Record in shootouts: W-L"),
-    "LAST_10_RECORD": st.column_config.TextColumn("L10", help="Last 10 games: W-L-OT"),
-    "STREAK": st.column_config.TextColumn("STRK", help="Current streak: W = wins, L = regulation losses, OT = OT/shootout losses"),
-    "LAST_10_ICONS": st.column_config.ImageColumn(
-        "Last 10", width=LAST_10_WIDTH,
-        help="Last 10 games, oldest first: check = win, grey dash = OT/shootout loss, red cross = regulation loss",
-    ),
-}
+# DIFF as +12 / -3, in green from 0 up and in red below
+DIFF_FORMAT = JsCode("function(params) { return params.value > 0 ? '+' + params.value : String(params.value); }")
+DIFF_STYLE = JsCode(f"""
+function(params) {{
+    return {{color: params.value < 0 ? '{LOSS_COLOR}' : '{WIN_COLOR}'}};
+}}
+""")
+POINTS_PCT_FORMAT = JsCode("function(params) { return params.value == null ? '' : params.value.toFixed(3); }")
+
+# Records and streaks are text like 9-2-1 or W2: sorting them alphabetically would mean nothing
+RECORD_COLUMN = {**UNSORTABLE, "flex": 1, "minWidth": 54}
+
+# Minimum widths add up to about 1,430px, so the whole table fits on a laptop screen. A sorted
+# header also shows an arrow: 56px for a 2-letter header, 64px for a longer one
+SHORT = {**NUMBER_COLUMN, "minWidth": 56}
+LONGER = {**NUMBER_COLUMN, "minWidth": 64}
+
+COLUMN_DEFS = [
+    # The official order: points, then every NHL tie breaker (computed in dbt). It doesn't change when
+    # the table is sorted by another column; clicking it goes back to the official order
+    {"field": "OFFICIAL_RANK", "headerName": "Official NHL Rank", "type": "numericColumn", "sort": "asc",
+     "sortingOrder": ["asc", "desc"], "width": 150,  # room for the sort arrow
+     "headerTooltip": "League rank after every NHL tie breaker, within the teams shown"},
+    {"field": "LOGO_URL", "headerName": "", **image_column(50, IMAGE_HEIGHT)},
+    {"field": "TEAM", "headerName": "Team", **TEXT_COLUMN, "minWidth": 140},
+    {"field": "GAMES_PLAYED", "headerName": "GP", "headerTooltip": "Games played", **SHORT},
+    {"field": "TOTAL_WINS", "headerName": "W", "headerTooltip": "Wins, including shootout wins", **SHORT},
+    {"field": "LOSSES", "headerName": "L", "headerTooltip": "Losses in regulation", **SHORT},
+    {"field": "OT_LOSSES", "headerName": "OT", "headerTooltip": "Losses in overtime or in a shootout", **SHORT},
+    {"field": "POINTS", "headerName": "PTS", "headerTooltip": "Points: win = 2, OT/shootout loss = 1", **LONGER},
+    {"field": "POINTS_PCT", "headerName": "P%", "headerTooltip": "Points % = points / (2 x games played)",
+     "valueFormatter": POINTS_PCT_FORMAT, **LONGER},
+    {"field": "REGULATION_WINS", "headerName": "RW", "headerTooltip": "Regulation wins", **SHORT},
+    {"field": "REGULATION_OT_WINS", "headerName": "ROW", "headerTooltip": "Regulation + overtime wins", **LONGER},
+    {"field": "GOALS_FOR", "headerName": "GF", "headerTooltip": "Goals for", **SHORT},
+    {"field": "GOALS_AGAINST", "headerName": "GA", "headerTooltip": "Goals against", **SHORT},
+    {"field": "GOAL_DIFF", "headerName": "DIFF", "headerTooltip": "Goal differential",
+     "valueFormatter": DIFF_FORMAT, "cellStyle": DIFF_STYLE, **LONGER},
+    {"field": "HOME_RECORD", "headerName": "Home", "headerTooltip": "Record at home: W-L-OT", **RECORD_COLUMN},
+    {"field": "AWAY_RECORD", "headerName": "Away", "headerTooltip": "Record away: W-L-OT", **RECORD_COLUMN},
+    {"field": "SHOOTOUT_RECORD", "headerName": "S/O", "headerTooltip": "Record in shootouts: W-L", **RECORD_COLUMN},
+    {"field": "LAST_10_RECORD", "headerName": "L10", "headerTooltip": "Last 10 games: W-L-OT", **RECORD_COLUMN},
+    {"field": "STREAK", "headerName": "STRK",
+     "headerTooltip": "Current streak: W = wins, L = regulation losses, OT = OT/shootout losses", **RECORD_COLUMN},
+    {"field": "LAST_10_ICONS", "headerName": "Last 10",
+     "headerTooltip": "Last 10 games, oldest first: check = win, grey dash = OT/shootout loss, red cross = regulation loss",
+     **image_column(LAST_10_WIDTH, ICONS_HEIGHT), "cellStyle": {"justifyContent": "flex-start"}},
+]
 
 
 def last_10_icons(results):
@@ -69,29 +99,14 @@ def last_10_icons(results):
     return "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
 
 
-def diff_color(diff):
-    """Text colour of the DIFF cell: green from 0 up, red when negative."""
-    return f"color: {LOSS_COLOR if diff < 0 else WIN_COLOR}"
-
-
-def standings_table(teams):
-    """RANKING is the league order (tie breakers included). The rank shown is recomputed within the
-    teams displayed, so a division starts at 1. Tied teams share a rank."""
+def standings_table(teams, key):
+    """RANKING is the league order (tie breakers included). The official rank shown is recomputed
+    within the teams displayed, so a division starts at 1. Tied teams share a rank."""
     table = teams.sort_values("RANKING").assign(
-        RANK=lambda d: d["RANKING"].rank(method="min").astype(int),
+        OFFICIAL_RANK=lambda d: d["RANKING"].rank(method="min").astype(int),
         LAST_10_ICONS=lambda d: d["LAST_10_RESULTS"].map(last_10_icons),
     )
-    st.dataframe(
-        # With a Styler, the table shows the Styler's text: the formats are set here, not in COLUMNS
-        table[list(COLUMNS)].style
-        .map(diff_color, subset=["GOAL_DIFF"])
-        .format({"GOAL_DIFF": "{:+d}", "POINTS_PCT": "{:.3f}"}, na_rep=""),
-        column_config=COLUMNS,
-        hide_index=True,
-        width="stretch",
-        # Header + one 35px row per team, so the whole table shows without scrolling
-        height=(len(table) + 1) * 35 + 3,
-    )
+    sortable_table(table, COLUMN_DEFS, ROW_HEIGHT, key=key)
 
 
 # ---------------------------------------------------------------------------
@@ -119,4 +134,5 @@ day_ranking = season_rankings[season_rankings["RANKING_DATE"] == selected_date]
 if group_column:
     day_ranking = day_ranking[day_ranking[group_column] == group]
 
-standings_table(day_ranking)
+# A new table for every date and group, so the data is never stale
+standings_table(day_ranking, key=f"standings_{selected_season}_{selected_date}_{view}_{group}")
