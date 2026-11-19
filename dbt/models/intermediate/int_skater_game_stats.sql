@@ -2,10 +2,8 @@
 -- int_player_game_stats and int_goalie_game_stats. A new stat is one more block in the union all.
 -- Season-to-date totals are in fct_skater_stats.
 --
--- Template, disabled until its first stat is written: remove the config line below, write the stat,
 -- then join this model in fct_skater_stats (see the TODO there).
 
-{{ config(enabled=false) }}
 
 with game_fetched_at as (
     select
@@ -23,25 +21,122 @@ with game_fetched_at as (
         on shifts.game_id = games.game_id
 ),
 
--- TODO shots: shots on goal of the player, the `shot-on-goal` and `goal` events of
--- stg_nhl_api__pbp (player_1_id), shootout excluded (period_number <> 5).
+shots_per_game as (
+    select 
+        game_id,
+        player_1_id as player_id,
+        count(*) as shots
+    from {{ ref('stg_nhl_api__pbp') }}
+    where event_type in('shot-on-goal','goal') and player_1_id is not null and period_number <> 5
+    group by game_id, player_1_id
+),
 
--- TODO ev_goals, ev_assists, pp_goals, pp_assists, sh_goals, sh_assists: the goals of fct_goals
--- split by strength_situation (EV, PP, SH; PS = penalty shot, decide where it goes), for the scorer
--- and the two assists.
+goal_events as (
+    select game_id, scoring_player_id as player_id, 'goal' as role, strength_situation
+    from {{ ref('int_goals_situations') }}
+    where scoring_player_id is not null
+
+    union all
+
+    select game_id, assist1_player_id as player_id, 'assist' as role, strength_situation
+    from {{ ref('int_goals_situations') }}
+    where assist1_player_id is not null
+
+    union all
+
+    select game_id, assist2_player_id as player_id, 'assist' as role, strength_situation
+    from {{ ref('int_goals_situations') }}
+    where assist2_player_id is not null
+
+),
+
+goal_splits as (
+
+    select
+        game_id,
+        player_id,
+        sum(iff(role = 'goal'   and strength_situation = 'EV', 1, 0)) as ev_goals,
+        sum(iff(role = 'assist' and strength_situation = 'EV', 1, 0)) as ev_assists,
+        sum(iff(role = 'goal'   and strength_situation = 'PP', 1, 0)) as pp_goals,
+        sum(iff(role = 'assist' and strength_situation = 'PP', 1, 0)) as pp_assists,
+        sum(iff(role = 'goal'   and strength_situation = 'SH', 1, 0)) as sh_goals,
+        sum(iff(role = 'assist' and strength_situation = 'SH', 1, 0)) as sh_assists,
+        sum(iff(role = 'goal'   and strength_situation = 'PS', 1, 0)) as ps_goals
+    from goal_events
+    group by game_id, player_id
+
+),
+
+plus_minus_goals as (
+    select
+        game_id,
+        event_id,
+        team_id as scoring_team_id,
+        period_number,
+        split_part(time_in_period, ':', 1)::int * 60 + split_part(time_in_period, ':', 2)::int as goal_s
+    from {{ ref('int_goals_situations') }}
+    where strength_situation in ('SH', 'EV')
+),
+
+skater_shifts as (
+    select 
+        game_id,
+        s.team_id,
+        s.player_id,
+        period,
+        split_part(start_time, ':', 1)::int * 60 + split_part(start_time, ':', 2)::int as start_s,
+        split_part(end_time, ':', 1)::int * 60 + split_part(end_time, ':', 2)::int as end_s,
+    from {{ ref('stg_nhl_api__games_shifts') }} s
+    join {{ ref('dim_players') }} p on s.player_id = p.player_id
+    where p.position <> 'G'
+),
+
+plus_minus_per_game as (
+    select 
+        s.game_id,
+        s.player_id,
+        sum(iff(s.team_id = g.scoring_team_id, 1, -1)) as plus_minus
+    from skater_shifts s 
+    join plus_minus_goals g 
+    on s.game_id = g.game_id
+    and s.period = g.period_number
+    and s.start_s < g.goal_s
+    and s.end_s >= g.goal_s
+    group by s.game_id, s.player_id
+),
 
 -- TODO plus_minus: +1 for every skater on the ice for an even strength or short handed goal of
 -- their team, -1 for the other team's skaters; power play goals and penalty shots don't count.
 -- Who was on the ice: the shifts (stg_nhl_api__games_shifts) that cover the time of the goal.
 
 stats as (
-
-    -- TODO one block per stat, e.g.
-    -- select game_id, player_id, 'shots' as stat_name, shots as stat_value
-    -- from shots_per_game
-    -- union all
-    -- ...
-
+    select game_id, player_id, 'shots' as stat_name, shots as stat_value
+    from shots_per_game where shots > 0
+    union all
+    select game_id, player_id, 'ev_goals' as stat_name, ev_goals as stat_value
+    from goal_splits where ev_goals > 0
+    union all
+    select game_id, player_id, 'ev_assists' as stat_name, ev_assists as stat_value
+    from goal_splits where ev_assists > 0
+    union all
+    select game_id, player_id, 'pp_goals' as stat_name, pp_goals as stat_value
+    from goal_splits where pp_goals > 0
+    union all
+    select game_id, player_id, 'pp_assists' as stat_name, pp_assists as stat_value
+    from goal_splits where pp_assists > 0
+    union all
+    select game_id, player_id, 'sh_goals' as stat_name, sh_goals as stat_value
+    from goal_splits where sh_goals > 0
+    union all
+    select game_id, player_id, 'sh_assists' as stat_name, sh_assists as stat_value
+    from goal_splits where sh_assists > 0
+    union all
+    select game_id, player_id, 'ps_goals' as stat_name, ps_goals as stat_value
+    from goal_splits where ps_goals > 0
+    union all
+    select game_id, player_id, 'plus_minus', plus_minus
+    from plus_minus_per_game
+    where plus_minus <> 0
 )
 
 select

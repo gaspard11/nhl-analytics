@@ -62,9 +62,15 @@ player_scoring as (
     group by game_id, player_id
 ),
 
--- TODO penalty_minutes: the `penalty` events of stg_nhl_api__pbp, the penalized player is
--- player_1_id, the length of the penalty is in `details` (minutes). One CTE here, then one block
--- in the union all below.
+penalty_minutes as (
+    select 
+        game_id,
+        player_1_id,
+        sum(details:duration::int) as total_penalty_minutes
+    from {{ ref('stg_nhl_api__pbp') }}
+    where event_type = 'penalty' and player_1_id is not null
+    group by game_id, player_1_id
+),
 
 stats as (
 
@@ -78,7 +84,10 @@ stats as (
     select game_id, player_id, 'assists', assists
     from player_scoring
     where assists > 0
-    -- TODO union all: penalty_minutes
+    union all
+    select game_id, player_1_id as player_id, 'penalty_minutes', total_penalty_minutes
+    from penalty_minutes
+    where total_penalty_minutes > 0
 
 )
 

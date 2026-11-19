@@ -57,7 +57,11 @@ goalie_games as (
         sum(iff(s.stat_name = 'saves', s.stat_value, 0))         as saves,
         sum(iff(s.stat_name = 'goals_against', s.stat_value, 0)) as goals_against,
         sum(iff(s.stat_name = 'shutout', s.stat_value, 0))       as shutouts,
-        -- TODO one line per new stat, e.g. sum(iff(s.stat_name = 'games_started', s.stat_value, 0)) as games_started,
+        sum(iff(s.stat_name = 'penalty_minutes', s.stat_value, 0))       as penalty_minutes,
+        sum(iff(s.stat_name = 'games_started', s.stat_value, 0))       as games_started,
+        sum(iff(s.stat_name = 'awarded_wins', s.stat_value, 0))      as awarded_wins,
+        sum(iff(s.stat_name = 'awarded_losses', s.stat_value, 0))    as awarded_losses,
+        sum(iff(s.stat_name = 'awarded_ot_losses', s.stat_value, 0)) as awarded_ot_losses,
         max(s.fetched_at)                                        as fetched_at
     from game_stats s
     join games g
@@ -98,7 +102,11 @@ prior_rows as (
         t.saves,
         t.goals_against,
         t.shutouts
-        -- TODO one line per new stat: t.<stat>
+        t.penalty_minutes,
+        t.games_started,
+        t.awarded_wins,
+        t.awarded_losses,
+        t.awarded_ot_losses
     from {{ this }} t
     join batch_start b
         on t.season = b.season
@@ -144,8 +152,12 @@ prior_state as (
         coalesce(p.assists, 0)        as prior_assists,
         coalesce(p.saves, 0)          as prior_saves,
         coalesce(p.goals_against, 0)  as prior_goals_against,
-        coalesce(p.shutouts, 0)       as prior_shutouts
-        -- TODO one line per new stat: coalesce(p.<stat>, 0) as prior_<stat>
+        coalesce(p.shutouts, 0)       as prior_shutouts,
+        coalesce(p.penalty_minutes, 0)       as prior_penalty_minutes,
+        coalesce(p.games_started, 0)  as prior_games_started,
+        coalesce(p.awarded_wins, 0)        as prior_awarded_wins,
+        coalesce(p.awarded_losses, 0)      as prior_awarded_losses,
+        coalesce(p.awarded_ot_losses, 0)   as prior_awarded_ot_losses
         {% else %}
         0                             as prior_games_played,
         0                             as prior_toi_seconds,
@@ -153,7 +165,12 @@ prior_state as (
         0                             as prior_assists,
         0                             as prior_saves,
         0                             as prior_goals_against,
-        0                             as prior_shutouts
+        0                             as prior_shutouts,
+        0                             as prior_penalty_minutes,
+        0                             as prior_games_started,
+        0                                  as prior_awarded_wins,
+        0                                  as prior_awarded_losses,
+        0                                  as prior_awarded_ot_losses
         -- TODO one line per new stat: 0 as prior_<stat>
         {% endif %}
     from batch_players bp
@@ -219,9 +236,32 @@ cumulative as (
         ps.prior_shutouts + sum(coalesce(gg.shutouts, 0)) over (
             partition by d.season, ps.player_id order by d.ranking_date
             rows between unbounded preceding and current row
-        ) as shutouts
+        ) as shutouts,
 
-        -- TODO one block per new stat, as above: ps.prior_<stat> + sum(coalesce(gg.<stat>, 0)) over (...) as <stat>
+        ps.prior_penalty_minutes + sum(coalesce(gg.penalty_minutes, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as penalty_minutes,
+
+        ps.prior_games_started + sum(coalesce(gg.games_started, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as games_started,
+
+        ps.prior_awarded_wins + sum(coalesce(gg.awarded_wins, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as awarded_wins,
+
+        ps.prior_awarded_losses + sum(coalesce(gg.awarded_losses, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as awarded_losses,
+
+        ps.prior_awarded_ot_losses + sum(coalesce(gg.awarded_ot_losses, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as awarded_ot_losses
 
     from batch_dates d
     join prior_state ps
@@ -244,7 +284,11 @@ select
     saves::integer                                   as saves,
     goals_against::integer                           as goals_against,
     shutouts::integer                                as shutouts,
-    -- TODO one line per new stat: <stat>::integer as <stat>,
+    penalty_minutes::integer                         as penalty_minutes,
+    games_started::integer                           as games_started,
+    awarded_wins::integer                            as awarded_wins,
+    awarded_losses::integer                          as awarded_losses,
+    awarded_ot_losses::integer                       as awarded_ot_losses,
     -- Computed stats, from the totals
     (goals_against + saves)::integer                 as shots_against,
     goals_against * 3600 / nullif(toi_seconds, 0)    as gaa,

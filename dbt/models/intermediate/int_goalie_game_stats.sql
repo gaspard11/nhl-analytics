@@ -66,13 +66,72 @@ saves_per_game as (
     group by game_id, goalie_in_net_id
 ),
 
--- TODO games_started: the goalie in net at the start of the game (their first shift starts at
--- 00:00 of period 1). One CTE here, then one block in the union all below.
+games_started as (
+    select distinct
+        game_id,
+        s.player_id
+    from {{ ref('stg_nhl_api__games_shifts') }} s
+    join {{ ref('dim_players') }} p
+    on s.player_id = p.player_id
+    where p.position = 'G' and s.start_time = '00:00' and s.period = 1
+),
 
--- TODO wins_awarded, losses_awarded, ot_awarded: the decision goes to the goalie in net when the
--- winning team scored the goal that put it ahead for good (goalie_in_net_id of the opponent's
--- goals in stg_nhl_api__pbp, the result in int_team_game_results). One CTE per decision or one CTE
--- with the three, then their blocks in the union all below.
+decisive_goals as (
+    select
+        gs.game_id,
+        gs.event_id,
+        gs.team_id,
+        gs.period_number,
+        split_part(gs.time_in_period, ':', 1)::int * 60 + split_part(gs.time_in_period, ':', 2)::int as time_in_period_seconds
+    from {{ ref('int_goals_situations') }} gs
+    join {{ ref('int_team_game_results') }} gr on gs.team_id = gr.team_id and gs.game_id = gr.game_id
+    where gr.result = 'W'
+    and iff(is_home, home_score, away_score) = gr.goals_against + 1
+),
+
+decisive_moments as (
+    select
+        game_id,
+        period_number as decisive_period,
+        time_in_period_seconds as decisive_time_seconds,
+    from decisive_goals
+    union all
+    select
+        game_id,
+        4 as decisive_period,
+        300 as decisive_time_seconds
+    from {{ ref('int_team_game_results') }}
+    where last_period_type = 'SO' and result = 'W'
+),
+
+goalie_shifts as (
+    select
+        game_id,
+        s.player_id,
+        s.team_id,
+        s.period,
+        split_part(start_time, ':', 1)::int * 60 + split_part(start_time, ':', 2)::int as start_s
+    from {{ ref('stg_nhl_api__games_shifts') }} s
+    join {{ ref('dim_players') }} p
+    on s.player_id = p.player_id
+    where p.position = 'G'
+),
+
+decisive_goalie_stat as (
+    select
+        s.game_id,
+        s.player_id,
+        gr.result
+    from goalie_shifts s
+    join decisive_moments d 
+    on s.game_id  = d.game_id
+    and (
+        s.period < d.decisive_period
+        or (s.period = d.decisive_period and s.start_s < d.decisive_time_seconds)
+    )
+    join {{ ref('int_team_game_results') }} gr on s.team_id = gr.team_id and d.game_id = gr.game_id
+    qualify row_number() over (partition by s.game_id, s.team_id order by s.period desc, s.start_s desc) = 1
+),
 
 stats as (
 
@@ -84,8 +143,21 @@ stats as (
     union all
     select game_id, player_id, 'shutout', 1
     from shutouts_awarded_games
-    -- TODO union all: games_started, wins_awarded, losses_awarded, ot_awarded
-
+    union all
+    select game_id, player_id, 'games_started', 1
+    from games_started
+    union all
+    select game_id, player_id, 'awarded_wins', 1
+    from decisive_goalie_stat
+    where result = 'W'
+    union all
+    select game_id, player_id, 'awarded_losses', 1
+    from decisive_goalie_stat
+    where result = 'L'
+    union all
+    select game_id, player_id, 'awarded_ot_losses', 1
+    from decisive_goalie_stat
+    where result = 'OT'
 )
 
 select

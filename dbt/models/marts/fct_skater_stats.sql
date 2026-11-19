@@ -34,10 +34,9 @@ game_stats as (
 
     select game_id, player_id, stat_name, stat_value, fetched_at
     from {{ ref('int_player_game_stats') }}
-
-    -- TODO once int_skater_game_stats is enabled, add the same select from ref('int_skater_game_stats')
-    -- with a union all (written with the double curly braces: Jinja runs even inside SQL comments,
-    -- so they can't be written here while the model is disabled)
+    union all
+    select game_id, player_id, stat_name, stat_value, fetched_at
+    from {{ ref('int_skater_game_stats') }}
 
 ),
 
@@ -52,7 +51,16 @@ skater_games as (
         sum(iff(s.stat_name = 'toi_seconds', s.stat_value, 0))   as toi_seconds,
         sum(iff(s.stat_name = 'goals', s.stat_value, 0))         as goals,
         sum(iff(s.stat_name = 'assists', s.stat_value, 0))       as assists,
-        -- TODO one line per new stat, e.g. sum(iff(s.stat_name = 'penalty_minutes', s.stat_value, 0)) as penalty_minutes,
+        sum(iff(s.stat_name = 'penalty_minutes', s.stat_value, 0))       as penalty_minutes,
+        sum(iff(s.stat_name = 'shots', s.stat_value, 0))       as shots,
+        sum(iff(s.stat_name = 'ev_goals', s.stat_value, 0))     as ev_goals,
+        sum(iff(s.stat_name = 'ev_assists', s.stat_value, 0))   as ev_assists,
+        sum(iff(s.stat_name = 'pp_goals', s.stat_value, 0))     as pp_goals,
+        sum(iff(s.stat_name = 'pp_assists', s.stat_value, 0))   as pp_assists,
+        sum(iff(s.stat_name = 'sh_goals', s.stat_value, 0))     as sh_goals,
+        sum(iff(s.stat_name = 'sh_assists', s.stat_value, 0))   as sh_assists,
+        sum(iff(s.stat_name = 'ps_goals', s.stat_value, 0))     as ps_goals,
+        sum(iff(s.stat_name = 'plus_minus', s.stat_value, 0))     as plus_minus,
         max(s.fetched_at)                                        as fetched_at
     from game_stats s
     join games g
@@ -89,8 +97,17 @@ prior_rows as (
         t.games_played,
         t.toi_seconds,
         t.goals,
-        t.assists
-        -- TODO one line per new stat: t.<stat>
+        t.assists,
+        t.penalty_minutes,
+        t.shots,
+        t.ev_goals,
+        t.ev_assists,
+        t.pp_goals,
+        t.pp_assists,
+        t.sh_goals,
+        t.sh_assists,
+        t.ps_goals,
+        t.plus_minus
     from {{ this }} t
     join batch_start b
         on t.season = b.season
@@ -133,14 +150,32 @@ prior_state as (
         coalesce(p.games_played, 0)  as prior_games_played,
         coalesce(p.toi_seconds, 0)   as prior_toi_seconds,
         coalesce(p.goals, 0)         as prior_goals,
-        coalesce(p.assists, 0)       as prior_assists
-        -- TODO one line per new stat: coalesce(p.<stat>, 0) as prior_<stat>
+        coalesce(p.assists, 0)       as prior_assists,
+        coalesce(p.penalty_minutes, 0)       as prior_penalty_minutes,
+        coalesce(p.shots, 0)       as prior_shots,
+        coalesce(p.ev_goals, 0)      as prior_ev_goals,
+        coalesce(p.ev_assists, 0)    as prior_ev_assists,
+        coalesce(p.pp_goals, 0)      as prior_pp_goals,
+        coalesce(p.pp_assists, 0)    as prior_pp_assists,
+        coalesce(p.sh_goals, 0)      as prior_sh_goals,
+        coalesce(p.sh_assists, 0)    as prior_sh_assists,
+        coalesce(p.ps_goals, 0)      as prior_ps_goals
+        coalesce(p.plus_minus, 0)    as prior_plus_minus
         {% else %}
         0                            as prior_games_played,
         0                            as prior_toi_seconds,
         0                            as prior_goals,
-        0                            as prior_assists
-        -- TODO one line per new stat: 0 as prior_<stat>
+        0                            as prior_assists,
+        0                            as prior_penalty_minutes,
+        0                            as prior_shots,
+        0                            as prior_ev_goals,
+        0                            as prior_ev_assists,
+        0                            as prior_pp_goals,
+        0                            as prior_pp_assists,
+        0                            as prior_sh_goals,
+        0                            as prior_sh_assists,
+        0                            as prior_ps_goals,
+        0                            as prior_plus_minus
         {% endif %}
     from batch_players bp
     {% if is_incremental() %}
@@ -190,9 +225,57 @@ cumulative as (
         ps.prior_assists + sum(coalesce(sg.assists, 0)) over (
             partition by d.season, ps.player_id order by d.ranking_date
             rows between unbounded preceding and current row
-        ) as assists
+        ) as assists,
 
-        -- TODO one block per new stat, as above: ps.prior_<stat> + sum(coalesce(sg.<stat>, 0)) over (...) as <stat>
+        ps.prior_penalty_minutes + sum(coalesce(sg.penalty_minutes, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as penalty_minutes,
+
+        ps.prior_shots + sum(coalesce(sg.shots, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as shots,
+
+        ps.prior_ev_goals + sum(coalesce(sg.ev_goals, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as ev_goals,
+
+        ps.prior_ev_assists + sum(coalesce(sg.ev_assists, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as ev_assists,
+
+        ps.prior_pp_goals + sum(coalesce(sg.pp_goals, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as pp_goals,
+
+        ps.prior_pp_assists + sum(coalesce(sg.pp_assists, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as pp_assists,
+
+        ps.prior_sh_goals + sum(coalesce(sg.sh_goals, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as sh_goals,
+
+        ps.prior_sh_assists + sum(coalesce(sg.sh_assists, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as sh_assists,
+
+        ps.prior_ps_goals + sum(coalesce(sg.ps_goals, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as ps_goals,
+
+        ps.prior_plus_minus + sum(coalesce(sg.plus_minus, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as plus_minus
 
     from batch_dates d
     join prior_state ps
@@ -212,7 +295,16 @@ select
     toi_seconds::integer                            as toi_seconds,
     goals::integer                                  as goals,
     assists::integer                                as assists,
-    -- TODO one line per new stat: <stat>::integer as <stat>,
+    penalty_minutes::integer                        as penalty_minutes,
+    shots::integer                                  as shots,
+    ev_goals::integer                               as ev_goals,
+    ev_assists::integer                             as ev_assists,
+    pp_goals::integer                               as pp_goals,
+    pp_assists::integer                             as pp_assists,
+    sh_goals::integer                               as sh_goals,
+    sh_assists::integer                             as sh_assists,
+    ps_goals::integer                               as ps_goals,
+    plus_minus::integer                             as plus_minus,
     -- Computed stats, from the totals
     (goals + assists)::integer                      as points,
     (select max(fetched_at) from skater_games)      as _source_fetched_at,

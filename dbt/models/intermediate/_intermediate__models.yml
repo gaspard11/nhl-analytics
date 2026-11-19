@@ -162,7 +162,7 @@ models:
           - not_null
           - accepted_values:
               arguments:
-                values: ['toi_seconds', 'goals', 'assists']
+                values: ['toi_seconds', 'goals', 'assists', 'penalty_minutes']
       - name: stat_value
         description: Value of the stat, a count (seconds for `toi_seconds`).
       - name: fetched_at
@@ -207,7 +207,7 @@ models:
           - not_null
           - accepted_values:
               arguments:
-                values: ['saves', 'goals_against', 'shutout']
+                values: ['saves', 'goals_against', 'shutout', 'games_started', 'awarded_wins', 'awarded_losses', 'awarded_ot_losses']
       - name: stat_value
         description: Value of the stat, a count.
       - name: fetched_at

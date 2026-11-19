@@ -9,7 +9,6 @@ select
     player_id,
     shift_number,
     period,
-    shift_id,
     start_time,
     end_time,
     duration,
