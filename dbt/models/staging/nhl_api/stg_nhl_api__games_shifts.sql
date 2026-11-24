@@ -23,3 +23,4 @@ select
 from source,
     lateral flatten(input => source.raw_payload:data) g
 where g.value:typeCode::int = 517
+qualify row_number() over (partition by game_id, player_id, period, start_time, end_time order by shift_number) = 1

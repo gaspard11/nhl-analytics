@@ -101,7 +101,7 @@ prior_rows as (
         t.assists,
         t.saves,
         t.goals_against,
-        t.shutouts
+        t.shutouts,
         t.penalty_minutes,
         t.games_started,
         t.awarded_wins,
