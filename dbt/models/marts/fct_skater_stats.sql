@@ -159,7 +159,7 @@ prior_state as (
         coalesce(p.pp_assists, 0)    as prior_pp_assists,
         coalesce(p.sh_goals, 0)      as prior_sh_goals,
         coalesce(p.sh_assists, 0)    as prior_sh_assists,
-        coalesce(p.ps_goals, 0)      as prior_ps_goals
+        coalesce(p.ps_goals, 0)      as prior_ps_goals,
         coalesce(p.plus_minus, 0)    as prior_plus_minus
         {% else %}
         0                            as prior_games_played,
