@@ -10,8 +10,8 @@ from sortable_table import NUMBER_COLUMN, TEXT_COLUMN, UNSORTABLE, image_column,
 
 ROW_HEIGHT = 70  # pixels, twice Streamlit's default, so the headshots are readable
 
-# Values as nhl.com shows them: time on ice 1234:56 (or 21:34 per game), save % .915, GAA 2.47,
-# shooting % 12.5
+# Values as nhl.com shows them: time on ice 1234:56 (or 21:34 per game), save % .915, GAA and P/GP
+# 2.47, shooting % and faceoff % 12.5. The marts store them unrounded: rounding happens only here
 TOI_FORMAT = JsCode("""
 function(params) {
     if (params.value == null) return '';
@@ -20,11 +20,12 @@ function(params) {
 }
 """)
 SAVE_PCT_FORMAT = JsCode("function(params) { return params.value == null ? '' : params.value.toFixed(3).replace(/^0/, ''); }")
-GAA_FORMAT = JsCode("function(params) { return params.value == null ? '' : params.value.toFixed(2); }")
-SHOOTING_PCT_FORMAT = JsCode("function(params) { return params.value == null ? '' : (100 * params.value).toFixed(1); }")
+TWO_DECIMALS_FORMAT = JsCode("function(params) { return params.value == null ? '' : params.value.toFixed(2); }")
+PERCENT_FORMAT = JsCode("function(params) { return params.value == null ? '' : (100 * params.value).toFixed(1); }")
 PLUS_MINUS_FORMAT = JsCode("function(params) { return params.value > 0 ? '+' + params.value : String(params.value); }")
 
-# Narrower than the default number column, so the 15 skater stats fit on a laptop screen
+# Narrower than the default number column. The 19 skater stats don't all fit on a laptop screen: the
+# table scrolls sideways
 STAT_COLUMN = {**NUMBER_COLUMN, "minWidth": 58}
 
 PLAYER_COLUMN_DEFS = [
@@ -47,17 +48,26 @@ SKATER_COLUMN_DEFS = PLAYER_COLUMN_DEFS + [
      "headerTooltip": "Plus/minus: +1 for each even strength or short handed goal of the team with the skater on the ice, -1 for each one against",
      "valueFormatter": PLUS_MINUS_FORMAT, **STAT_COLUMN},
     {"field": "PENALTY_MINUTES", "headerName": "PIM", "headerTooltip": "Penalty minutes", **STAT_COLUMN},
+    {"field": "POINTS_PER_GAME", "headerName": "P/GP", "headerTooltip": "Points per game played",
+     "valueFormatter": TWO_DECIMALS_FORMAT, **STAT_COLUMN},
     {"field": "EV_GOALS", "headerName": "EVG", "headerTooltip": "Even strength goals", **STAT_COLUMN},
     {"field": "EV_POINTS", "headerName": "EVP", "headerTooltip": "Even strength points: goals + assists", **STAT_COLUMN},
     {"field": "PP_GOALS", "headerName": "PPG", "headerTooltip": "Power play goals", **STAT_COLUMN},
     {"field": "PP_POINTS", "headerName": "PPP", "headerTooltip": "Power play points: goals + assists", **STAT_COLUMN},
     {"field": "SH_GOALS", "headerName": "SHG", "headerTooltip": "Short handed goals", **STAT_COLUMN},
     {"field": "SH_POINTS", "headerName": "SHP", "headerTooltip": "Short handed points: goals + assists", **STAT_COLUMN},
+    {"field": "OT_GOALS", "headerName": "OTG", "headerTooltip": "Overtime goals, shootout excluded", **STAT_COLUMN},
+    {"field": "GW_GOALS", "headerName": "GWG",
+     "headerTooltip": "Game-winning goals: the goal that put the team ahead for good. None in a game decided in a shootout",
+     **STAT_COLUMN},
     {"field": "SHOTS", "headerName": "S", "headerTooltip": "Shots on goal, shootout excluded", **STAT_COLUMN},
     {"field": "SHOOTING_PCT", "headerName": "S%", "headerTooltip": "Shooting percentage: goals / shots",
-     "valueFormatter": SHOOTING_PCT_FORMAT, **STAT_COLUMN},
+     "valueFormatter": PERCENT_FORMAT, **STAT_COLUMN},
     {"field": "TOI_PER_GAME", "headerName": "TOI/GP", "headerTooltip": "Average time on ice per game, minutes:seconds",
      "valueFormatter": TOI_FORMAT, **STAT_COLUMN, "minWidth": 72},
+    {"field": "FACEOFF_WIN_PCT", "headerName": "FOW%",
+     "headerTooltip": "Faceoff win percentage: faceoffs won / faceoffs taken. Empty for a skater who hasn't taken one",
+     "valueFormatter": PERCENT_FORMAT, **STAT_COLUMN, "minWidth": 66},
 ]
 
 # The columns of nhl.com's goalie summary, this season up to the chosen date
@@ -73,11 +83,15 @@ GOALIE_COLUMN_DEFS = PLAYER_COLUMN_DEFS + [
     {"field": "GOALS_AGAINST", "headerName": "GA", "headerTooltip": "Goals against, shootout and empty net goals excluded", **STAT_COLUMN},
     {"field": "SAVE_PCT", "headerName": "SV%", "headerTooltip": "Save percentage: saves / shots against", "valueFormatter": SAVE_PCT_FORMAT, **STAT_COLUMN},
     # Sorted by GAA to start with, lowest first
-    {"field": "GAA", "headerName": "GAA", "headerTooltip": "Goals against average: goals against per 60 minutes", "valueFormatter": GAA_FORMAT,
+    {"field": "GAA", "headerName": "GAA", "headerTooltip": "Goals against average: goals against per 60 minutes", "valueFormatter": TWO_DECIMALS_FORMAT,
      **STAT_COLUMN, "sortingOrder": ["asc", "desc"], "sort": "asc"},
     {"field": "SHUTOUTS", "headerName": "SO", "headerTooltip": "Shutouts: full games without a goal against, shootout excluded", **STAT_COLUMN},
     {"field": "TOI_SECONDS", "headerName": "TOI", "headerTooltip": "Time on ice this season, minutes:seconds",
      "valueFormatter": TOI_FORMAT, **STAT_COLUMN, "minWidth": 80},
+    {"field": "GOALS", "headerName": "G", "headerTooltip": "Goals scored by the goalie", **STAT_COLUMN},
+    {"field": "ASSISTS", "headerName": "A", "headerTooltip": "Assists of the goalie", **STAT_COLUMN},
+    {"field": "POINTS", "headerName": "P", "headerTooltip": "Points: goals + assists", **STAT_COLUMN},
+    {"field": "PENALTY_MINUTES", "headerName": "PIM", "headerTooltip": "Penalty minutes", **STAT_COLUMN},
 ]
 
 
@@ -113,15 +127,19 @@ def load_skaters():
         stats.plus_minus,
         stats.penalty_minutes,
         stats.ev_goals,
-        stats.ev_goals + stats.ev_assists                       as ev_points,
+        stats.ev_points,
         stats.pp_goals,
-        stats.pp_goals + stats.pp_assists                       as pp_points,
+        stats.pp_points,
         stats.sh_goals,
-        stats.sh_goals + stats.sh_assists                       as sh_points,
+        stats.sh_points,
+        stats.ot_goals,
+        stats.gw_goals,
         stats.shots,
         -- ::float: Snowflake decimals would come back as Python Decimal objects, sorted as text
-        (stats.goals / nullif(stats.shots, 0))::float           as shooting_pct,
-        (stats.toi_seconds / stats.games_played)::float         as toi_per_game
+        stats.points_per_game::float                            as points_per_game,
+        stats.shooting_pct::float                               as shooting_pct,
+        stats.toi_per_game_seconds::float                       as toi_per_game,
+        stats.faceoff_win_pct::float                            as faceoff_win_pct
     from nhl_analytics.marts.fct_skater_stats as stats
     {PLAYER_JOINS}
     """
@@ -145,7 +163,11 @@ def load_goalies():
         -- ::float: Snowflake decimals would come back as Python Decimal objects, sorted as text
         stats.save_pct::float as save_pct,
         stats.gaa::float as gaa,
-        stats.shutouts
+        stats.shutouts,
+        stats.goals,
+        stats.assists,
+        stats.points,
+        stats.penalty_minutes
     from nhl_analytics.marts.fct_goalie_stats as stats
     {PLAYER_JOINS}
     """

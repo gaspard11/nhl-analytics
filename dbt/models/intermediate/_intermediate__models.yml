@@ -124,7 +124,8 @@ models:
       One row per goal of a finished game, shootout goals excluded, with its situation from the scoring
       team's point of view: who had more skaters (strength_situation), which net was empty
       (net_situation) and the skaters on each side (strength), all worked out from situation_code.
-      Read by fct_goals and by the player stats (EV / PP / SH splits, +/-, goalie decisions).
+      Also flags the game-winning goal. Read by fct_goals and by the player stats (EV / PP / SH splits,
+      +/-, OT and game-winning goals, goalie decisions).
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -184,6 +185,14 @@ models:
         description: >
           Skaters on the ice when the goal was scored, scoring team first, e.g. `5 on 4`. Goalies are not
           counted, so a team with its goalie pulled shows 6 skaters. `Penalty shot` for a penalty shot goal.
+      - name: is_game_winning_goal
+        description: >
+          True for the goal that put the scoring team one ahead of the other team's final score: the
+          goal after which the winner was ahead for good. Exactly one per game, none in a game decided in
+          a shootout (the NHL credits no game-winning goal there; shootout goals aren't in this model).
+          Gives the skaters' game-winning goals and the moment of the goalie decisions.
+        data_tests:
+          - not_null
 
   # Per-game player stats, long format: one row per game, player and stat, in three families (common
   # to every player, skater only, goalie only). Season-to-date totals are in the marts
@@ -242,7 +251,8 @@ models:
   - name: int_skater_game_stats
     description: >
       Skater-only stats, per game: one row per game, skater and stat (long format). A skater with no row
-      for a stat had none of it. The goal splits and +/- come from int_goals_situations.
+      for a stat had none of it. The goal splits, OT and game-winning goals and +/- come from
+      int_goals_situations, the shots and faceoffs from the play-by-play.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -274,6 +284,10 @@ models:
           `ps_goals`: penalty shot goals (never assisted). `plus_minus`: +1 for each even strength or short
           handed goal of the skater's team while they were on the ice (a shift covering the time of the
           goal), -1 for each one of the other team; power play goals and penalty shots don't count.
+          `ot_goals`: goals scored in overtime (period 4 or later), shootout excluded.
+          `gw_goals`: game-winning goals (is_game_winning_goal in int_goals_situations).
+          `faceoffs_won`, `faceoffs_lost`: faceoffs won and lost by the player (the winner and the loser
+          of each `faceoff` event).
         data_tests:
           - not_null
           - accepted_values:
