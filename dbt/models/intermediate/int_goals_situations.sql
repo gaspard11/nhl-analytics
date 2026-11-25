@@ -1,6 +1,6 @@
 with games as (
 
-    select * from {{ ref('stg_nhl_api__games') }}
+    select * from {{ ref('int_team_game_results') }}
 
 ),
 
@@ -15,10 +15,11 @@ coded as (
     select
         goals.*,
         lpad(goals.situation_code, 4, '0')      as code,
-        goals.team_id = games.home_team_id      as is_home
+        games.is_home,
+        games.goals_against
     from goals
     inner join games
-        on goals.game_id = games.game_id
+        on goals.game_id = games.game_id and goals.team_id = games.team_id
 
 ),
 
@@ -78,5 +79,6 @@ select
     case
         when code in ('0101', '1010') then 'Penalty shot'
         else own_skaters || ' on ' || opp_skaters
-    end as strength
+    end as strength,
+    iff(is_home, home_score, away_score) = goals_against + 1 as is_game_winning_goal
 from effective

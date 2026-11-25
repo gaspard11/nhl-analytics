@@ -84,9 +84,7 @@ decisive_goals as (
         gs.period_number,
         split_part(gs.time_in_period, ':', 1)::int * 60 + split_part(gs.time_in_period, ':', 2)::int as time_in_period_seconds
     from {{ ref('int_goals_situations') }} gs
-    join {{ ref('int_team_game_results') }} gr on gs.team_id = gr.team_id and gs.game_id = gr.game_id
-    where gr.result = 'W'
-    and iff(is_home, home_score, away_score) = gr.goals_against + 1
+    where gs.is_game_winning_goal
 ),
 
 decisive_moments as (
