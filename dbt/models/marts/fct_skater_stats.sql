@@ -7,7 +7,7 @@
 
 -- Season-to-date stats per skater, for every game date, from the skater's first game of the season.
 -- The running totals are kept here (cumulative, incremental); the per-game stats come from
--- int_player_game_stats (stats common to every player) and, once it exists, int_skater_game_stats.
+-- int_player_game_stats (stats common to every player) and int_skater_game_stats.
 -- Computed stats (points) are computed on each row from the totals.
 -- No ranking: the app sorts on the stat it shows.
 
@@ -61,6 +61,10 @@ skater_games as (
         sum(iff(s.stat_name = 'sh_assists', s.stat_value, 0))   as sh_assists,
         sum(iff(s.stat_name = 'ps_goals', s.stat_value, 0))     as ps_goals,
         sum(iff(s.stat_name = 'plus_minus', s.stat_value, 0))     as plus_minus,
+        sum(iff(s.stat_name = 'ot_goals', s.stat_value, 0))       as ot_goals,
+        sum(iff(s.stat_name = 'gw_goals', s.stat_value, 0))       as gw_goals,
+        sum(iff(s.stat_name = 'faceoffs_won', s.stat_value, 0))   as faceoffs_won,
+        sum(iff(s.stat_name = 'faceoffs_lost', s.stat_value, 0))  as faceoffs_lost,
         max(s.fetched_at)                                        as fetched_at
     from game_stats s
     join games g
@@ -107,7 +111,11 @@ prior_rows as (
         t.sh_goals,
         t.sh_assists,
         t.ps_goals,
-        t.plus_minus
+        t.plus_minus,
+        t.ot_goals,
+        t.gw_goals,
+        t.faceoffs_won,
+        t.faceoffs_lost
     from {{ this }} t
     join batch_start b
         on t.season = b.season
@@ -160,7 +168,11 @@ prior_state as (
         coalesce(p.sh_goals, 0)      as prior_sh_goals,
         coalesce(p.sh_assists, 0)    as prior_sh_assists,
         coalesce(p.ps_goals, 0)      as prior_ps_goals,
-        coalesce(p.plus_minus, 0)    as prior_plus_minus
+        coalesce(p.plus_minus, 0)    as prior_plus_minus,
+        coalesce(p.ot_goals, 0)      as prior_ot_goals,
+        coalesce(p.gw_goals, 0)      as prior_gw_goals,
+        coalesce(p.faceoffs_won, 0)  as prior_faceoffs_won,
+        coalesce(p.faceoffs_lost, 0) as prior_faceoffs_lost
         {% else %}
         0                            as prior_games_played,
         0                            as prior_toi_seconds,
@@ -175,7 +187,11 @@ prior_state as (
         0                            as prior_sh_goals,
         0                            as prior_sh_assists,
         0                            as prior_ps_goals,
-        0                            as prior_plus_minus
+        0                            as prior_plus_minus,
+        0                            as prior_ot_goals,
+        0                            as prior_gw_goals,
+        0                            as prior_faceoffs_won,
+        0                            as prior_faceoffs_lost
         {% endif %}
     from batch_players bp
     {% if is_incremental() %}
@@ -275,7 +291,27 @@ cumulative as (
         ps.prior_plus_minus + sum(coalesce(sg.plus_minus, 0)) over (
             partition by d.season, ps.player_id order by d.ranking_date
             rows between unbounded preceding and current row
-        ) as plus_minus
+        ) as plus_minus,
+
+        ps.prior_ot_goals + sum(coalesce(sg.ot_goals, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as ot_goals,
+
+        ps.prior_gw_goals + sum(coalesce(sg.gw_goals, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as gw_goals,
+
+        ps.prior_faceoffs_won + sum(coalesce(sg.faceoffs_won, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as faceoffs_won,
+
+        ps.prior_faceoffs_lost + sum(coalesce(sg.faceoffs_lost, 0)) over (
+            partition by d.season, ps.player_id order by d.ranking_date
+            rows between unbounded preceding and current row
+        ) as faceoffs_lost
 
     from batch_dates d
     join prior_state ps
@@ -305,9 +341,20 @@ select
     sh_assists::integer                             as sh_assists,
     ps_goals::integer                               as ps_goals,
     plus_minus::integer                             as plus_minus,
+    ot_goals::integer                               as ot_goals,
+    gw_goals::integer                               as gw_goals,
+    faceoffs_won::integer                           as faceoffs_won,
+    faceoffs_lost::integer                          as faceoffs_lost,
     -- Computed stats, from the totals
     (goals + assists)::integer                      as points,
-    (select max(fetched_at) from skater_games)      as _source_fetched_at,
+    (ev_goals + ev_assists)::integer                as ev_points,
+    (pp_goals + pp_assists)::integer                as pp_points,
+    (sh_goals + sh_assists)::integer                as sh_points,
+    points/nullif(games_played,0)                   as points_per_game,
+    goals/nullif(shots,0)                                   as shooting_pct,
+    toi_seconds/nullif(games_played,0)                      as toi_per_game_seconds,
+    faceoffs_won/nullif((faceoffs_won+faceoffs_lost),0)     as faceoff_win_pct,
+    (select max(fetched_at) from skater_games)     as _source_fetched_at,
     current_timestamp()                             as _batch_loaded_at
 from cumulative
 -- A skater appears from their first game

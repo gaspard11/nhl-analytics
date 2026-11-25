@@ -278,7 +278,7 @@ models:
           - not_null
           - accepted_values:
               arguments:
-                values: ['shots', 'ev_goals', 'ev_assists', 'pp_goals', 'pp_assists', 'sh_goals', 'sh_assists', 'ps_goals', 'plus_minus']
+                values: ['shots', 'ev_goals', 'ev_assists', 'pp_goals', 'pp_assists', 'sh_goals', 'sh_assists', 'ps_goals', 'plus_minus', 'ot_goals', 'gw_goals', 'faceoffs_won', 'faceoffs_lost']
       - name: stat_value
         description: Value of the stat, a count, except `plus_minus` which can be negative.
       - name: fetched_at

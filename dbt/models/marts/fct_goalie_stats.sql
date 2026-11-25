@@ -293,6 +293,7 @@ select
     (goals_against + saves)::integer                 as shots_against,
     goals_against * 3600 / nullif(toi_seconds, 0)    as gaa,
     saves / nullif(goals_against + saves, 0)         as save_pct,
+    (goals + assists)::integer                        as points,
     (select max(fetched_at) from goalie_games)       as _source_fetched_at,
     current_timestamp()                              as _batch_loaded_at
 from cumulative
