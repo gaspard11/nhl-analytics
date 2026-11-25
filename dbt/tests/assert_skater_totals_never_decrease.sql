@@ -5,7 +5,8 @@
 
 {% set stats = [
     'games_played', 'toi_seconds', 'goals', 'assists', 'penalty_minutes', 'shots',
-    'ev_goals', 'ev_assists', 'pp_goals', 'pp_assists', 'sh_goals', 'sh_assists', 'ps_goals'
+    'ev_goals', 'ev_assists', 'pp_goals', 'pp_assists', 'sh_goals', 'sh_assists', 'ps_goals',
+    'ot_goals', 'gw_goals', 'faceoffs_won', 'faceoffs_lost'
 ] %}
 
 with ordered as (

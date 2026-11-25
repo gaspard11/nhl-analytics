@@ -8,7 +8,7 @@
 {% set stats = [
     'toi_seconds', 'goals', 'assists', 'penalty_minutes', 'shots',
     'ev_goals', 'ev_assists', 'pp_goals', 'pp_assists', 'sh_goals', 'sh_assists', 'ps_goals',
-    'plus_minus'
+    'plus_minus', 'ot_goals', 'gw_goals', 'faceoffs_won', 'faceoffs_lost'
 ] %}
 
 with latest as (

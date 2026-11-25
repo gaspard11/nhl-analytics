@@ -107,8 +107,10 @@ models:
       skater's first game of the season. Cumulative state table (incremental, delete+insert on
       season, ranking_date): each run reads every skater's last row before the new data and recomputes
       the days from there, from the per-game stats of int_player_game_stats (common to every player)
-      and int_skater_game_stats (skater only). Computed stats (points) are computed on each row from the
-      totals. No ranking: the app sorts on the stat it shows.
+      and int_skater_game_stats (skater only). Only counts are accumulated; points, the EV / PP / SH
+      points, the per-game averages, shooting % and faceoff % are computed on each row from the totals,
+      since a ratio can't be added up from one game to the next. No ranking: the app sorts on the stat
+      it shows.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -123,6 +125,15 @@ models:
               ev_goals + pp_goals + sh_goals + ps_goals = goals
               and ev_assists + pp_assists + sh_assists = assists
               and shots >= goals
+              and ot_goals <= goals
+              and gw_goals <= goals
+      # The computed stats match the totals they come from
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: >
+              ev_points = ev_goals + ev_assists
+              and pp_points = pp_goals + pp_assists
+              and sh_points = sh_goals + sh_assists
     columns:
       - name: ranking_date
         description: "{{ doc('ranking_date') }}"
@@ -170,8 +181,57 @@ models:
         description: >
           Season-to-date +/-: +1 for each even strength or short handed goal of the team with the skater
           on the ice, -1 for each one of the other team. Can be negative.
+      - name: ot_goals
+        description: Season-to-date overtime goals, shootout excluded.
+      - name: gw_goals
+        description: >
+          Season-to-date game-winning goals: the goal that put the team one ahead of the other team's
+          final score. None in games decided in a shootout.
+      - name: faceoffs_won
+        description: Season-to-date faceoffs won.
+      - name: faceoffs_lost
+        description: Season-to-date faceoffs lost.
       - name: points
         description: Season-to-date points = goals + assists. Computed from the totals.
+      - name: ev_points
+        description: Even strength points = ev_goals + ev_assists. Computed from the totals.
+      - name: pp_points
+        description: Power play points = pp_goals + pp_assists. Computed from the totals.
+      - name: sh_points
+        description: >
+          Short handed points = sh_goals + sh_assists. Computed from the totals. Penalty shot goals are in
+          none of the three splits, so ev_points + pp_points + sh_points can be below points.
+      - name: points_per_game
+        description: points / games_played, not rounded. Computed from the totals.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+      - name: shooting_pct
+        description: >
+          Shooting percentage, goals / shots, between 0 and 1, not rounded. Null when the skater has no
+          shot. Computed from the totals.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: toi_per_game_seconds
+        description: Average time on ice per game, toi_seconds / games_played, in seconds, not rounded. Computed from the totals.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 3900
+      - name: faceoff_win_pct
+        description: >
+          Faceoff win percentage, faceoffs_won / (faceoffs_won + faceoffs_lost), between 0 and 1, not
+          rounded. Null when the skater hasn't taken a faceoff. Computed from the totals.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
       - name: _source_fetched_at
         description: Latest load of the per-game stats when the row was computed. The watermark of the incremental runs.
       - name: _batch_loaded_at
@@ -182,7 +242,7 @@ models:
       Season-to-date stats per goalie, for every game date from the goalie's first game of the season.
       Cumulative state table (incremental, delete+insert on season, ranking_date), from the per-game
       stats of int_player_game_stats and int_goalie_game_stats. Only counts are accumulated; shots
-      against, GAA and save % are computed on each row from the totals, since a ratio can't be added up
+      against, GAA, save % and points are computed on each row from the totals, since a ratio can't be added up
       from one game to the next. Every goalie is kept, as in the full stats table on nhl.com: there is
       no minimum number of games, the app filters.
     data_tests:
@@ -197,6 +257,7 @@ models:
               and toi_seconds <= games_played * 3900
               and games_started <= games_played
               and awarded_wins + awarded_losses + awarded_ot_losses <= games_played
+              and points = goals + assists
     columns:
       - name: ranking_date
         description: "{{ doc('ranking_date') }}"
@@ -258,6 +319,8 @@ models:
               arguments:
                 min_value: 0
                 max_value: 1
+      - name: points
+        description: Season-to-date points of the goalie = goals + assists. Computed from the totals.
       - name: _source_fetched_at
         description: Latest load of the per-game stats when the row was computed. The watermark of the incremental runs.
       - name: _batch_loaded_at
