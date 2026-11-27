@@ -56,6 +56,22 @@ goal_against_per_game as (
     group by game_id, goalie_in_net_id
 ),
 
+goals_against_by_strength as (
+    select
+        pbp.game_id,
+        pbp.goalie_in_net_id as player_id,
+        gs.strength_situation,
+        count(*) as stat_value
+    from {{ ref('stg_nhl_api__pbp') }} pbp
+    join {{ ref('int_goals_situations') }} gs
+        on gs.game_id = pbp.game_id
+       and gs.event_id = pbp.event_id
+    where pbp.event_type = 'goal'
+      and pbp.period_number <> 5
+      and pbp.goalie_in_net_id is not null
+    group by all
+),
+
 saves_per_game as (
     select
         game_id,
@@ -156,6 +172,22 @@ stats as (
     select game_id, player_id, 'awarded_ot_losses', 1
     from decisive_goalie_stat
     where result = 'OT'
+    union all 
+    select game_id, player_id, 'ev_goal_against', stat_value
+    from goals_against_by_strength
+    where strength_situation  = 'EV'
+    union all 
+    select game_id, player_id, 'pp_goal_against', stat_value
+    from goals_against_by_strength
+    where strength_situation  = 'PP'
+    union all 
+    select game_id, player_id, 'sh_goal_against', stat_value
+    from goals_against_by_strength
+    where strength_situation  = 'SH'
+    union all 
+    select game_id, player_id, 'ps_goal_against', stat_value
+    from goals_against_by_strength
+    where strength_situation  = 'PS'
 )
 
 select
