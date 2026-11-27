@@ -90,6 +90,15 @@ skater_shifts as (
     where p.position <> 'G'
 ),
 
+skater_shifts_counts as (
+    select
+        game_id,
+        player_id,
+        count(*) as number_of_shifts
+    from skater_shifts
+    group by game_id, player_id
+),
+
 plus_minus_per_game as (
     select 
         s.game_id,
@@ -122,6 +131,17 @@ faceoff_splits as (
         sum(iff(result = 'lost' , 1, 0)) as faceoffs_lost
     from faceoff_events
     group by game_id, player_id
+),
+
+other_stats as (
+    select 
+        game_id,
+        player_1_id as player_id,
+        event_type,
+        count(*) as stats_value
+    from {{ ref('stg_nhl_api__pbp') }}
+    where event_type in('giveaway', 'takeaway', 'hit', 'blocked-shot') and player_1_id is not null and period_number <> 5
+    group by game_id, player_1_id, event_type
 ),
 
 
@@ -169,6 +189,26 @@ stats as (
     select game_id, player_id, 'faceoffs_lost', faceoffs_lost
     from faceoff_splits
     where faceoffs_lost > 0
+    union all
+    select game_id, player_id, 'takeaways', stats_value
+    from other_stats
+    where event_type = 'takeaway' and stats_value > 0
+    union all
+    select game_id, player_id, 'giveaways', stats_value
+    from other_stats
+    where event_type = 'giveaway' and stats_value > 0
+    union all
+    select game_id, player_id, 'hits', stats_value
+    from other_stats
+    where event_type = 'hit' and stats_value > 0
+    union all
+    select game_id, player_id, 'blocked-shots', stats_value
+    from other_stats
+    where event_type = 'blocked-shot' and stats_value > 0
+    union all
+    select game_id, player_id , 'number_of_shifts', number_of_shifts
+    from skater_shifts_counts
+    where number_of_shifts > 0
     
 )
 

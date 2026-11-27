@@ -292,7 +292,7 @@ models:
           - not_null
           - accepted_values:
               arguments:
-                values: ['shots', 'ev_goals', 'ev_assists', 'pp_goals', 'pp_assists', 'sh_goals', 'sh_assists', 'ps_goals', 'plus_minus', 'ot_goals', 'gw_goals', 'faceoffs_won', 'faceoffs_lost']
+                values: ['shots', 'ev_goals', 'ev_assists', 'pp_goals', 'pp_assists', 'sh_goals', 'sh_assists', 'ps_goals', 'plus_minus', 'ot_goals', 'gw_goals', 'faceoffs_won', 'faceoffs_lost', 'takeaways', 'giveaways', 'hits', 'blocked-shots', 'number_of_shifts']
       - name: stat_value
         description: Value of the stat, a count, except `plus_minus` which can be negative.
       - name: fetched_at
@@ -342,7 +342,7 @@ models:
           - not_null
           - accepted_values:
               arguments:
-                values: ['saves', 'goals_against', 'shutout', 'games_started', 'awarded_wins', 'awarded_losses', 'awarded_ot_losses']
+                values: ['saves', 'goals_against', 'shutout', 'games_started', 'awarded_wins', 'awarded_losses', 'awarded_ot_losses', 'ev_goal_against','pp_goal_against','sh_goal_against','ps_goal_against']
       - name: stat_value
         description: Value of the stat, a count.
       - name: fetched_at
